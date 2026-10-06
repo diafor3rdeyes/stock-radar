@@ -509,7 +509,7 @@ function requestRefresh(){
     }, 5000);
   }).catch(function(){ setStat('수집 요청을 보내지 못했습니다.'); pull(); endRefresh(); });
 }
-var aliasMap = {}, alAbbr = '', stopList = [], listsLoaded = false;
+var aliasMap = {}, alAbbr = '', stopList = load('sr-stop',[]), listsLoaded = false;
 function mergeLinked(){
   /* 풀네임을 연결한 줄임말 행은 같은 종목 행에 합친다(언급 수·평소 수 더하기). 같은 종목이 없으면 그 행을 그 종목으로 바꾼다. */
   var arr=data.stocks, out=[], byName={};
@@ -534,7 +534,7 @@ function mergeLinked(){
 function loadLists(){
   /* 제거 단어·줄임말의 최신 목록은 저장소(KV)에서 직접 읽는다. 집계 파일(trend.json)은 다음 집계 전까지 옛 값이라 덮어쓰면 안 된다. */
   fetch('/api/alias?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(j){
-    if(j&&j.ok){ listsLoaded=true; aliasMap=j.map||{}; stopList=j.stop||[]; mergeLinked(); renderAmap(); renderStops(); renderAll(); }
+    if(j&&j.ok){ listsLoaded=true; aliasMap=j.map||{}; stopList=j.stop||[]; save('sr-stop',stopList); mergeLinked(); renderAmap(); renderStops(); renderAll(); }
   }).catch(function(){});
 }
 function aliasBox(show){ var b=document.getElementById('aliasbox'); b.hidden=!show; b.style.display=show?'flex':'none'; }
@@ -578,7 +578,7 @@ function sendStop(body,done){
   }).then(function(x){
     if(x.status===404||x.status===503){ done('저장 기능이 아직 설정되지 않았습니다(서버 연결 필요).',false); return; }
     if(!x.j.ok){ done('저장하지 못했습니다: '+(x.j.error||x.status),false); return; }
-    stopList=x.j.stop||[]; renderStops(); renderAll(); done('저장했습니다.',true);
+    stopList=x.j.stop||[]; save('sr-stop',stopList); renderStops(); renderAll(); done('저장했습니다.',true);
   }).catch(function(){ done('저장 요청을 보내지 못했습니다.',false); });
 }
 function addStop(w){ w=(w||'').trim(); if(!w) return; sendStop({stop:w},function(t){ document.getElementById('st-msg').textContent='"'+w+'" '+t; }); }
@@ -664,7 +664,7 @@ function pull(){
   try{ fetch('trend.json?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(j&&j.stocks){
       data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,runLog:j.runLog||[],f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
-      if(!listsLoaded){ aliasMap=j.aliasMap||aliasMap; stopList=j.stopWords||stopList; }
+      if(j.listsLive){ listsLoaded=true; aliasMap=j.aliasMap||{}; stopList=j.stopWords||[]; save('sr-stop',stopList); }
       loadLists(); renderAmap(); renderStops(); renderLog();
       ensureDictStocks(); mergeLinked(); head(); renderNps(); renderAll();
     }
