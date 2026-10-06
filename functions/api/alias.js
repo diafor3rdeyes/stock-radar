@@ -24,6 +24,17 @@ export async function onRequestPost({ request, env }) {
 
   let b;
   try { b = await request.json(); } catch { return json({ ok: false, error: "bad_json" }, 400); }
+  // AI 잔액 입력: 입력한 시점의 잔액과 그때까지 쓴 누적 금액을 같이 저장해 두면, 이후 쓴 만큼 빼서 남은 금액을 계산한다
+  if (b.budget !== undefined) {
+    const amount = Number(b.budget.amount), usdAtSet = Number(b.budget.usdAtSet || 0);
+    if (!isFinite(amount) || amount < 0 || amount > 100000 || !isFinite(usdAtSet) || usdAtSet < 0) {
+      return json({ ok: false, error: "금액이 올바르지 않습니다" }, 400);
+    }
+    const rec = { amount, usdAtSet, setAt: new Date().toISOString() };
+    await env.RADAR.put("aibudget", JSON.stringify(rec));
+    return json({ ok: true, budget: rec });
+  }
+
   // 제거할 단어(후보에서 빼기) 추가/복원
   if (b.stop || b.unstop) {
     const w = String(b.stop || b.unstop).trim();
