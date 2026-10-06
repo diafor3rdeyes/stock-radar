@@ -16,6 +16,24 @@ export async function onRequestPost({ request, env }) {
 
   let b;
   try { b = await request.json(); } catch { return json({ ok: false, error: "bad_json" }, 400); }
+  // 제거할 단어(후보에서 빼기) 추가/복원
+  if (b.stop || b.unstop) {
+    const w = String(b.stop || b.unstop).trim();
+    if (!w || w.length > 20) return json({ ok: false, error: "단어가 비었거나 너무 깁니다" }, 400);
+    let list = [];
+    try { list = JSON.parse((await env.RADAR.get("stopwords")) || "[]"); } catch { list = []; }
+    if (b.stop) {
+      if (!list.includes(w)) {
+        if (list.length >= 500) return json({ ok: false, error: "제거 단어는 최대 500개입니다" }, 400);
+        list.push(w);
+      }
+    } else {
+      list = list.filter((x) => x !== w);
+    }
+    await env.RADAR.put("stopwords", JSON.stringify(list));
+    return json({ ok: true, stop: list });
+  }
+
   const abbr = String(b.abbr || "").trim();
   if (!abbr || abbr.length > 20) return json({ ok: false, error: "줄임말이 비었거나 너무 깁니다" }, 400);
 
