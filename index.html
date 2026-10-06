@@ -149,12 +149,23 @@ body{margin:0}
 .stampbadge{margin-left:auto;display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:999px;background:var(--soft);color:var(--fg);font-weight:800;font-size:13px;border:1px solid var(--line)}
 .stampbadge.stale{background:#fdecea;color:#b3261e;border-color:#f3b8b3}
 :root[data-theme="dark"] .stampbadge.stale{background:#3a1d1a;color:#ffb4ab;border-color:#6b2f29}@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .stampbadge.stale{background:#3a1d1a;color:#ffb4ab;border-color:#6b2f29}}
+.progstrip{background:var(--soft);border-bottom:1px solid var(--line)}
+.progstrip[hidden]{display:none}
+.progstrip .inner{display:flex;align-items:center;gap:12px;padding-top:10px;padding-bottom:10px;flex-wrap:wrap}
+.progtrack{flex:1 1 220px;max-width:520px;height:12px;border-radius:999px;background:var(--line);overflow:hidden;position:relative}
+.progtrack i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--brand));transition:width .45s ease;position:relative;overflow:hidden}
+.progtrack i::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);transform:translateX(-100%);animation:progshine 1.3s linear infinite}
+.progtrack.done i::after{animation:none;opacity:0}
+.progpct{font-weight:900;font-size:15px;min-width:44px;font-variant-numeric:tabular-nums}
+@keyframes progshine{to{transform:translateX(100%)}}
+@media (prefers-reduced-motion:reduce){.progtrack i::after{animation:none}.progtrack i{transition:none}}
 </style>
 </head>
 <body>
 
 <div class="topbar"><div class="inner"><span>커뮤니티 화제 → 평소 대비 급증 → 국민연금 → AI 요약, 어디서 뜨는지 데이터로 확인하세요</span><span class="stamp" id="stamp"></span></div></div>
 <header class="sitehead"><div class="inner"><div class="logo">종목<span>레이더</span></div><div class="headbtns"><span class="stamp note" id="refstat"></span><button class="btn primary" id="reload">지금 수집하기</button></div></div></header>
+<div class="progstrip" id="prog" hidden><div class="inner"><div class="progtrack" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="prog-track"><i id="prog-fill"></i></div><span id="prog-pct" class="progpct">0%</span><span id="prog-txt" class="note"></span></div></div>
 <section class="hero"><div class="inner">
   <h1>지금 커뮤니티에서<br>어떤 종목이 뜨고 있을까요?</h1>
   <p>디시인사이드 글을 평소 언급량과 비교해 급증한 종목부터 보여 드리고, 국민연금 공시와 AI 요약까지 한 번에 확인합니다.</p>
@@ -795,12 +806,36 @@ function head(){
     ? '커뮤니티 순위, 비중, 등락률은 화면 확인용 샘플 숫자입니다. 실제 값이 아닙니다. stock_radar.py를 실행해 trend.json을 만들면 실제 값으로 바뀝니다.'
     : '시세는 무료 시세원 기준이라 종목에 따라 지연될 수 있습니다. '+(data.titleCount?'오늘 수집한 글: '+Object.keys(data.titleCount).map(function(k){return k+' '+data.titleCount[k].toLocaleString('ko-KR')+'개';}).join(' · ')+'. ':'')+((data.skipped||[]).length ? '수집 제외: '+data.skipped.join(', ') : '');
 }
-var refreshing = false;
+var refreshing = false, refreshStart = 0, progWas = false, progStartMs = 0, progHideT = null;
+function progTick(){
+  var strip=document.getElementById('prog'); if(!strip) return;
+  var col=collecting(), act=(col||refreshing) && !data.isSample;
+  var fill=document.getElementById('prog-fill'), pctEl=document.getElementById('prog-pct'), txt=document.getElementById('prog-txt'), tr=document.getElementById('prog-track');
+  if(act){
+    clearTimeout(progHideT); progHideT=null; tr.classList.remove('done');
+    var start=(col&&data.refreshAt>0)?data.refreshAt:(refreshStart||Date.now());
+    if(col&&refreshStart&&refreshStart<start) start=refreshStart;
+    progStartMs=start;
+    var exp=Math.max(40,Math.min(600,Number(load('sr-dur',150))||150))*1000, el=Math.max(0,Date.now()-start), pct;
+    if(el<exp) pct=90*(el/exp); else pct=90+9*(1-Math.exp(-(el-exp)/exp));
+    pct=Math.min(99,Math.floor(pct));
+    var left=Math.max(0,Math.ceil((exp-el)/1000));
+    strip.hidden=false; fill.style.width=pct+'%'; pctEl.textContent=pct+'%'; tr.setAttribute('aria-valuenow',pct);
+    txt.textContent = el<exp ? '수집 중 · 약 '+(left>=60?Math.floor(left/60)+'분 ':'')+(left%60)+'초 남음 (예상) · 새로고침해도 계속됩니다' : '마무리 중… 거의 다 됐습니다 · 새로고침해도 계속됩니다';
+  } else if(progWas){
+    var d=(new Date(data.generatedISO||0).getTime()-progStartMs)/1000;
+    if(progStartMs>0&&d>20&&d<900){ var prev=Number(load('sr-dur',150))||150; save('sr-dur',Math.round(prev*0.5+d*0.5)); }   // 걸린 시간을 배워 다음 예상에 쓴다
+    fill.style.width='100%'; pctEl.textContent='100%'; tr.classList.add('done'); tr.setAttribute('aria-valuenow',100); txt.textContent='수집 완료 ✔';
+    progHideT=setTimeout(function(){ strip.hidden=true; },2500);
+  }
+  progWas=act;
+}
+setInterval(progTick,500);
 function setStat(t){ document.getElementById('refstat').textContent = t; }
-function endRefresh(){ refreshing = false; document.getElementById('reload').disabled = false; left = POLL; }
+function endRefresh(){ refreshing = false; refreshStart = 0; document.getElementById('reload').disabled = false; left = POLL; }
 function requestRefresh(){
   if(refreshing) return;
-  refreshing = true;
+  refreshing = true; refreshStart = Date.now();
   document.getElementById('reload').disabled = true;
   setStat('수집을 요청하는 중…');
   var before = data.generatedISO || '';
