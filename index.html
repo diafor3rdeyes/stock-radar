@@ -409,7 +409,7 @@ function compute(){
     var surge = ready ? Math.max(0,(total-base)/Math.sqrt(base+1)) : total*0.05;
     var score = surge*(1+0.15*Math.max(n-1,0));
     return {s:s,m:m,total:total,base:base,ready:ready,n:n,score:score};
-  }).filter(function(x){return x.total>0 && (!x.s.cand || (showCand && stopList.indexOf(x.s.name)<0));});
+  }).filter(function(x){return x.total>0 && ((!x.s.cand || showCand) && stopList.indexOf(x.s.name)<0);});
   list.sort(function(a,b){return (b.score-a.score)||(b.total-a.total);});
   list.forEach(function(x,i){x.rank=i+1;});
   return list;
@@ -468,7 +468,7 @@ function computeRt(){
       if(c){ m[src.id]=c; total+=c; n++; }
     });
     return {s:s,m:m,total:total,base:0,ready:false,n:n,score:total};
-  }).filter(function(x){return x.total>0 && (!x.s.cand || (showCand && stopList.indexOf(x.s.name)<0));});
+  }).filter(function(x){return x.total>0 && ((!x.s.cand || showCand) && stopList.indexOf(x.s.name)<0);});
   list.sort(function(a,b){return (b.total-a.total)||(b.n-a.n)||String(a.s.name).localeCompare(b.s.name);});
   list.forEach(function(x,i){x.rank=i+1;});
   return list;
@@ -528,7 +528,7 @@ function renderRt(){
   seg.innerHTML=RT_OPTS.map(function(o){return '<button data-rt="'+o[0]+'" aria-pressed="'+(o[0]===rtH)+'">'+o[1]+'</button>';}).join('');
   seg.querySelectorAll('[data-rt]').forEach(function(b){ b.addEventListener('click',function(){ rtH=parseInt(b.dataset.rt); save('sr-rt',rtH); renderAll(); }); });
   var ref=refMin(), hm=function(v){ v=((v%1440)+1440)%1440; return ('0'+Math.floor(v/60)).slice(-2)+':'+('0'+(v%60)).slice(-2); };
-  document.getElementById('rt-note').textContent='디시인사이드 글의 작성 시각 기준, 지금('+hm(ref)+')부터 '+rtLabel().replace('하루','24시간')+' 전('+hm(ref-rtMax())+')까지 가장 많이 언급된 순서입니다. 자정을 넘어도 전날 글까지 이어서 셉니다. 제거한 단어·연결한 줄임말·커뮤니티 체크(트렌드 알림 탭)가 그대로 적용됩니다. FM코리아·네이버 붙여넣기는 글 시각이 없어 여기서는 제외됩니다.';
+  document.getElementById('rt-note').textContent='디시인사이드 글의 작성 시각 기준, 지금('+hm(ref)+')부터 '+rtLabel().replace('하루','24시간')+' 전('+hm(ref-rtMax())+')까지 가장 많이 언급된 순서입니다. 자정을 넘어도 전날 글까지 이어서 셉니다. 제거한 단어·연결한 줄임말·커뮤니티 체크(트렌드 알림 탭)가 그대로 적용됩니다. FM코리아·네이버 붙여넣기는 글 시각이 없어 여기서는 제외됩니다. 잘못 뺀 단어는 트렌드 알림 탭 아래 "제거할 단어"에서 되돌릴 수 있습니다.';
   if(data.isSample){ document.getElementById('rt-rows').innerHTML='<p class="note">샘플 화면에서는 실시간 언급이 나오지 않습니다.</p>'; return; }
   renderRows(computeRt(),'rt-rows',true);
 }
@@ -570,7 +570,7 @@ function renderRows(list,elId,rt){
       '<div><div class="name"><button class="star" data-w="'+esc(wk(s))+'" aria-pressed="'+(!!watch[wk(s)])+'" aria-label="'+esc(s.name)+' 관심 종목">'+(watch[wk(s)]?'★':'☆')+'</button>'+'<button class="namebtn" data-open="'+esc(key)+'" aria-expanded="'+(!!openPosts[key])+'" title="'+((pl.length)?'클릭하면 이 단어가 언급된 글을 볼 수 있습니다':'')+'">'+esc(s.name)+((pl.length)?' <span class="car">'+(openPosts[key]?'▾':'▸')+'</span>':'')+'</button> <span class="code">'+esc(s.code)+'</span></div>'+
       '<div class="meta">'+(rt?'최근 '+rtLabel()+' 동안 '+x.total+'건 언급':x.ready?'평소 '+x.base+' → 지금 '+x.total+'건 (×'+(x.total/Math.max(x.base,1)).toFixed(1)+') · 점수 '+x.score.toFixed(0):'평소 기준 수집 중 · 언급 '+x.total+'건')+' &nbsp;'+delta+' '+hot+' '+multi+'</div></div>'+
       '<div class="bar" role="img" aria-label="출처별 언급 비중">'+segs+'</div>'+
-      '<div class="actions">'+pxHtml(s)+(s.cand?'<button class="btn primary" data-al="'+esc(s.name)+'">풀네임 연결</button><button class="btn" data-st="'+esc(s.name)+'">제거</button>':(s.tv?'<a class="btn primary" href="'+tvUrl(s.tv)+'" target="_blank" rel="noopener">차트 분석</a>':(s.named?'<button class="btn primary" data-code="'+esc(s.name)+'">코드 등록</button>':'<a class="btn" href="https://search.naver.com/search.naver?query='+encodeURIComponent(s.name+' 주가')+'" target="_blank" rel="noopener">주가 검색</a>')))+'</div>'+postsHtml(s,key,rt)+'</div>';
+      '<div class="actions">'+pxHtml(s)+(s.cand?'<button class="btn primary" data-al="'+esc(s.name)+'">풀네임 연결</button><button class="btn" data-st="'+esc(s.name)+'">제거</button>':(s.tv?'<a class="btn primary" href="'+tvUrl(s.tv)+'" target="_blank" rel="noopener">차트 분석</a>':(s.named?'<button class="btn primary" data-code="'+esc(s.name)+'">코드 등록</button>':'<a class="btn" href="https://search.naver.com/search.naver?query='+encodeURIComponent(s.name+' 주가')+'" target="_blank" rel="noopener">주가 검색</a>')))+(s.cand?'':'<button class="btn" data-st="'+esc(s.name)+'" title="이 종목을 순위에서 뺍니다">제거</button>')+'</div>'+postsHtml(s,key,rt)+'</div>';
   }).join('');
   el.querySelectorAll('[data-more]').forEach(function(b){ b.addEventListener('click',function(){ var n=b.dataset.more; morePosts[n]=!morePosts[n]; renderAll(); }); });
   el.querySelectorAll('[data-open]').forEach(function(b){ b.addEventListener('click',function(){ var n=b.dataset.open; openPosts[n]=!openPosts[n]; renderAll(); }); });
