@@ -3,8 +3,8 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "full 또는 prices"
-        default: "full"
+        description: "full, trend, prices 중 하나"
+        default: "trend"
   schedule:
     - cron: "0 0,6,12 * * *"
     - cron: "*/10 * * * 1-5"
@@ -38,11 +38,16 @@ jobs:
 
       - name: 실행
         run: |
-          if [ "${{ github.event.schedule }}" = "*/10 * * * 1-5" ] || [ "${{ github.event.inputs.mode }}" = "prices" ]; then
-            python stock_radar.py --prices
-          else
-            python stock_radar.py
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -z "$MODE" ]; then
+            if [ "${{ github.event.schedule }}" = "*/10 * * * 1-5" ]; then MODE=trend; else MODE=full; fi
           fi
+          echo "실행 모드: $MODE"
+          case "$MODE" in
+            prices) python stock_radar.py --prices ;;
+            trend)  python stock_radar.py --trend ;;
+            *)      python stock_radar.py ;;
+          esac
 
       - name: KV에 올리기
         run: |
