@@ -683,7 +683,7 @@ def collect_trend(out, old):
             s["b"] = b
         stocks.append(s)
     stocks.sort(key=lambda s: -sum(s["m"].values()))
-    out.update({"generatedAt": now_kst().strftime("%Y-%m-%d %H:%M"), "generatedISO": now_kst().isoformat(),
+    out.update({"generatedAt": now_kst().strftime("%Y-%m-%d %H:%M"), "generatedISO": now_kst().isoformat(), "prevGeneratedISO": old.get("generatedISO"),
                 "skipped": skipped, "stocks": stocks,
                 "titleCount": {k: len(v) for k, v in per_src.items()},
                 "stopWords": stop_list,

@@ -471,13 +471,13 @@ function postsFor(s,rt){
     var v=(+tm.slice(0,2))*60+(+tm.slice(3)); return v>=Math.max(0,ref-max)&&v<=ref;
   });
 }
-function computeRt(){
-  var max=rtMax();
+function computeRt(off){
+  off=off||0; var max=rtMax();
   var list=data.stocks.map(function(s){
     var tm=s.tm||{}, m={}, total=0, n=0;
     SOURCES.forEach(function(src){
       if(!active[src.id]) return;
-      var a=tm[src.id]||[], c=0; for(var i=0;i<a.length;i++){ if(a[i]<=max) c++; }
+      var a=tm[src.id]||[], c=0; for(var i=0;i<a.length;i++){ if(a[i]>=off&&a[i]<=max+off) c++; }
       if(c){ m[src.id]=c; total+=c; n++; }
     });
     return {s:s,m:m,total:total,base:0,ready:false,n:n,score:total};
@@ -536,6 +536,11 @@ function srStart(){
   loadSr(); if(srTimer) clearInterval(srTimer);
   srTimer=setInterval(function(){ if(!document.getElementById('p-sr').hidden) loadSr(); },60000);
 }
+function rtDelta(){
+  /* 직전 수집이 몇 분 전이었는지. 같은 글 목록에서 그만큼 시간을 되돌려 '직전 수집 때 순위'를 다시 계산한다 */
+  var g=new Date(data.generatedISO||0).getTime(), p=new Date(data.prevGeneratedISO||0).getTime();
+  var m=Math.round((g-p)/60000); return (g>0&&p>0&&m>=1&&m<=180)?m:0;
+}
 function renderRt(){
   var seg=document.getElementById('rt-seg'); if(!seg) return;
   seg.innerHTML=RT_OPTS.map(function(o){return '<button data-rt="'+o[0]+'" aria-pressed="'+(o[0]===rtH)+'">'+o[1]+'</button>';}).join('');
@@ -543,7 +548,9 @@ function renderRt(){
   var ref=refMin(), hm=function(v){ v=((v%1440)+1440)%1440; return ('0'+Math.floor(v/60)).slice(-2)+':'+('0'+(v%60)).slice(-2); };
   document.getElementById('rt-note').textContent='디시인사이드 글의 작성 시각 기준, 지금('+hm(ref)+')부터 '+rtLabel().replace('하루','24시간')+' 전('+hm(ref-rtMax())+')까지 가장 많이 언급된 순서입니다. 자정을 넘어도 전날 글까지 이어서 셉니다. 제거한 단어·연결한 줄임말·커뮤니티 체크(트렌드 알림 탭)가 그대로 적용됩니다. FM코리아·네이버 붙여넣기는 글 시각이 없어 여기서는 제외됩니다. 잘못 뺀 단어는 트렌드 알림 탭 아래 "제거할 단어"에서 되돌릴 수 있습니다.';
   if(data.isSample){ document.getElementById('rt-rows').innerHTML='<p class="note">샘플 화면에서는 실시간 언급이 나오지 않습니다.</p>'; return; }
-  renderRows(computeRt(),'rt-rows',true);
+  var cur=computeRt(0), d=rtDelta();
+  if(d>0){ var pm={}; computeRt(d).forEach(function(x){ pm[x.s.name]=x.rank; }); cur.forEach(function(x){ x.prevRank=pm[x.s.name]||null; x.cmp=true; }); }
+  renderRows(cur,'rt-rows',true);
 }
 function postsHtml(s,key,rt){
   key=key||s.name;
@@ -570,9 +577,9 @@ function renderRows(list,elId,rt){
   el.innerHTML = view.map(function(x){
     var s=x.s, d = s.prev==null ? null : s.prev - x.rank;
     var delta = d==null ? '<span class="badge b-new">신규</span>' :
-      d>0 ? '<span class="delta up">▲'+d+'</span>' : d<0 ? '<span class="delta down">▼'+(-d)+'</span>' : '<span class="delta flat">-</span>';
+      d>0 ? '<span class="delta up">🔺'+d+'위 상승</span>' : d<0 ? '<span class="delta down">▼'+(-d)+'</span>' : '<span class="delta flat">-</span>';
     var hot = (d==null || d>=prefs.jump) ? '<span class="badge b-up">급상승</span>' : '';
-    if(rt){ delta=''; hot=''; }
+    if(rt){ hot=''; delta = !x.cmp ? '' : (x.prevRank==null ? '<span class="badge b-new">🆕 신규</span>' : (x.prevRank>x.rank ? '<span class="delta up">🔺'+(x.prevRank-x.rank)+'위 상승</span>' : '')); }
     var key=(rt?'rt:':'')+s.name, pl=postsFor(s,rt);
     var multi = x.n>=3 ? '<span class="badge b-multi">'+x.n+'곳 동시</span>' : '';
     var segs = SOURCES.filter(function(src){return active[src.id] && (x.m[src.id]||0)>0;}).map(function(src){
@@ -1207,7 +1214,7 @@ document.getElementById('fm-clear').addEventListener('click',function(){fm={};fm
 function pull(){
   try{ fetch('trend.json?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(j&&j.stocks){
-      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,runLog:j.runLog||[],aiSummary:j.aiSummary||null,aiUsage:j.aiUsage||null,aiBudget:j.aiBudget||null,aiRequestedAt:j.aiRequestedAt||0,refreshAt:j.refreshAt||0,f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
+      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,prevGeneratedISO:j.prevGeneratedISO||null,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,runLog:j.runLog||[],aiSummary:j.aiSummary||null,aiUsage:j.aiUsage||null,aiBudget:j.aiBudget||null,aiRequestedAt:j.aiRequestedAt||0,refreshAt:j.refreshAt||0,f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
       if(j.listsLive){ listsLoaded=true; aliasMap=j.aliasMap||{}; stopList=j.stopWords||[]; save('sr-stop',stopList); }
       loadLists(); renderAmap(); renderStops(); renderLog(); renderAi();
       ensureDictStocks(); ensureNaver(); mergeLinked(); head(); renderNps(); renderAll();
