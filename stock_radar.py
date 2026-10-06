@@ -29,7 +29,7 @@ def now_kst():
 UA = "Mozilla/5.0 (compatible; StockRadar/0.1; personal use)"
 SEC_UA = os.environ.get("SEC_USER_AGENT", "StockRadar personal use your-email@example.com")  # SEC는 연락처 포함 UA를 요구
 DELAY = 0.7
-MAX_PAGES = 80          # 갤러리 하나당 최대 페이지 (오늘 글이 끝나면 먼저 멈춤)
+MAX_PAGES = 160         # 갤러리 하나당 최대 페이지 (24시간치가 끝나면 먼저 멈춤)
 AI_MODEL = os.environ.get("AI_MODEL", "claude-haiku-4-5-20251001")
 AI_HOUR = 9             # (사용 안 함) 예전 자동 갱신 시각
 AI_RETRY_MIN = 30       # 실패하면 이 간격(분) 안에는 다시 시도하지 않는다
@@ -83,10 +83,30 @@ def allowed(url):
     rp = _robots[host]
     return bool(rp) and rp.can_fetch(UA, url)
 
+def _row_time(d, now):
+    """목록 한 줄의 작성 시각을 돌려준다. (시각, 몇 분 전). 읽을 수 없으면 (None, None)."""
+    full = (d.get("title") or "").strip()
+    ts = None
+    for fmt, n in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d %H:%M", 16)):
+        try:
+            ts = datetime.datetime.strptime(full[:n], fmt).replace(tzinfo=KST)
+            break
+        except ValueError:
+            pass
+    if ts is None:
+        m = re.match(r"^(\d{1,2}):(\d{2})$", d.get_text(strip=True))
+        if m:
+            ts = now.replace(hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0)
+    if ts is None:
+        return None, None
+    return ts, max(0, int((now - ts).total_seconds() // 60))
+
 def fetch_titles(url):
-    """오늘(한국시간) 올라온 글 제목을 페이지를 넘기며 전부 모은다.
-    목록은 최신순이라, 한 페이지에 오늘 글이 하나도 없으면 거기서 멈춘다."""
-    today = now_kst().date().isoformat()
+    """최근 24시간(어제 이 시각부터 지금까지) 올라온 글을 페이지를 넘기며 모은다.
+    제목 집계(titles)는 오늘 글만, 실시간 언급용 목록(posts)은 24시간 전체를 담는다.
+    목록은 최신순이라, 한 페이지에 24시간 안의 글이 하나도 없으면 거기서 멈춘다."""
+    now = now_kst()
+    today = now.date()
     titles, seen, posts = [], set(), []
     t0 = time.time()
     info = {"pages": 0, "perPage": [], "stop": ""}
@@ -97,7 +117,7 @@ def fetch_titles(url):
             break
         soup = BeautifulSoup(r.text, "html.parser")
         rows = soup.select("tr.ub-content")
-        today_rows = 0
+        today_rows = recent_rows = 0
         for tr in rows:
             num = tr.select_one("td.gall_num")
             if not num or not num.get_text(strip=True).isdigit():
@@ -105,11 +125,13 @@ def fetch_titles(url):
             d = tr.select_one("td.gall_date")
             if not d:
                 continue
-            stamp = (d.get("title") or "")[:10]
-            is_today = (stamp == today) if stamp else (":" in d.get_text())
-            if not is_today:
+            ts, ago = _row_time(d, now)
+            if ts is None or ago > 24 * 60:
                 continue
-            today_rows += 1
+            recent_rows += 1
+            is_today = ts.date() == today
+            if is_today:
+                today_rows += 1
             key = num.get_text(strip=True)
             if key in seen:
                 continue
@@ -117,20 +139,21 @@ def fetch_titles(url):
             a = tr.select_one("td.gall_tit a:not(.reply_numbox)")
             t = a.get_text(strip=True) if a else ""
             if t:
-                titles.append(t)
+                if is_today:
+                    titles.append(t)
                 href = (a.get("href") or "") if a else ""
                 link = re.sub(r"&page=\d+", "", urljoin(url, href)) if href else ""
-                posts.append((t, link, (d.get("title") or "")[11:16]))
+                posts.append((t, link, ts.strftime("%H:%M"), ago))
         info["pages"] = page
         info["perPage"].append(today_rows)
         if not rows:
             info["stop"] = f"{page}페이지가 비어 있어 멈춤"
             break
-        if today_rows == 0:
-            info["stop"] = f"{page}페이지에 오늘 글이 없어 멈춤 (오늘 글 끝까지 읽음)"
+        if recent_rows == 0:
+            info["stop"] = f"{page}페이지에 최근 24시간 글이 없어 멈춤 (24시간치 끝까지 읽음)"
             break
         if page == MAX_PAGES:
-            info["stop"] = f"최대 {MAX_PAGES}페이지에 도달 (오늘 글이 더 있을 수 있음)"
+            info["stop"] = f"최대 {MAX_PAGES}페이지에 도달 (글이 더 있을 수 있음)"
         time.sleep(DELAY)
     info["sec"] = round(time.time() - t0, 1)
     info["titles"] = len(titles)
@@ -562,28 +585,25 @@ def ai_summary(per_src, stocks, old):
         return fail("exception")
 
 def match_posts(aliases, posts_by_src, limit=POSTS_PER_STOCK):
-    """그 종목(단어)이 제목에 들어간 오늘 글을 최신순으로 골라 [출처, 제목, 링크, 시각]으로 돌려준다."""
+    """그 종목(단어)이 제목에 들어간 최근 24시간 글을 최신순으로 골라 [출처, 제목, 링크, 시각, 몇 분 전]으로 돌려준다."""
     als = [a.lower() for a in aliases if len(a) >= 2]
     hits = []
     for sid, plist in posts_by_src.items():
-        for t, u, tm in plist:
+        for t, u, tm, ago in plist:
             tl = t.lower()
             if u.startswith("https://gall.dcinside.com/") and any(a in tl for a in als):
-                hits.append((tm, sid, t, u))
-    hits.sort(key=lambda x: x[0], reverse=True)
-    return [[sid, t, u, tm] for tm, sid, t, u in hits[:limit]]
+                hits.append((ago, sid, t, u, tm))
+    hits.sort(key=lambda x: x[0])
+    return [[sid, t, u, tm, ago] for ago, sid, t, u, tm in hits[:limit]]
 
 def match_times(aliases, posts_by_src):
-    """그 종목(단어)이 제목에 들어간 오늘 글의 작성 시각(하루 중 몇 분째)을 출처별로 모두 돌려준다. 실시간 언급 탭용."""
+    """그 종목(단어)이 제목에 들어간 최근 24시간 글이 '몇 분 전'에 쓰였는지를 출처별로 모두 돌려준다. 실시간 언급 탭용."""
     als = [a.lower() for a in aliases if len(a) >= 2]
     out = {}
     for sid, plist in posts_by_src.items():
-        for t, u, tm in plist:
-            if len(tm) == 5 and tm[2] == ":" and any(a in t.lower() for a in als):
-                try:
-                    out.setdefault(sid, []).append(int(tm[:2]) * 60 + int(tm[3:]))
-                except ValueError:
-                    pass
+        for t, u, tm, ago in plist:
+            if any(a in t.lower() for a in als):
+                out.setdefault(sid, []).append(ago)
     return out
 
 def track_usage(new, old):
@@ -611,6 +631,8 @@ def _scan(sid, url):
     except Exception as e:
         return sid, None, str(e)[:120], None
 
+LAST_POSTS = {}   # 이번 수집에서 읽은 최근 24시간 글 {출처: [(제목, 링크, 시각, 몇 분 전)]} → posts.json (실시간 검색 탭용)
+
 def collect_trend(out, old):
     """오늘 올라온 글 제목을 전부 모아 종목 언급 수를 세고, 등록 안 된 반복 단어도 후보로 센다."""
     from concurrent.futures import ThreadPoolExecutor
@@ -624,6 +646,7 @@ def collect_trend(out, old):
             else:
                 per_src[sid] = titles
                 posts_by_src[sid] = info.pop("posts", [])
+                LAST_POSTS[sid] = posts_by_src[sid]
                 log_src.append({"id": sid, **info})
                 print(f"{sid}: 오늘 글 {len(titles)}개, 1~{info['pages']}페이지, {info['stop']}")
     counts = {n: {} for n in STOCKS}
@@ -711,6 +734,22 @@ def kv_put(key, text):
                      data=text.encode("utf-8"), timeout=30)
     r.raise_for_status()
 
+def save_posts(use_kv):
+    """최근 24시간 글 전체를 posts.json으로 저장하고, 클라우드플레어 열쇠가 있으면 KV(posts)에도 올린다. 화면의 '실시간 검색' 탭이 읽는다."""
+    rows = []
+    for sid, plist in LAST_POSTS.items():
+        for t, u, tm, ago in plist:
+            rows.append([sid, t, u.replace("https://gall.dcinside.com", ""), ago, tm])
+    rows.sort(key=lambda r: r[3])
+    text = json.dumps({"at": now_kst().isoformat(), "p": rows}, ensure_ascii=False, separators=(",", ":"))
+    open("posts.json", "w", encoding="utf-8").write(text)
+    if use_kv or os.environ.get("CF_API_TOKEN"):
+        try:
+            kv_put("posts", text)
+            print(f"posts 저장: {len(rows)}건, {len(text)//1024}KB")
+        except Exception as e:
+            print("posts 올리기 실패(검색 탭만 영향):", str(e)[:120])
+
 def main():
     """--prices : 시세만 / --trend : 언급 집계 + 시세 / --filings : 공시만(내 컴퓨터용, --kv 권장)
     인자 없음 : 전부. --kv 를 붙이면 클라우드플레어 KV에서 읽고 KV에 올린다."""
@@ -751,6 +790,8 @@ def main():
     open("trend.json", "w", encoding="utf-8").write(text)
     if use_kv:
         kv_put("trend", text)
+    if mode in ("trend", "full") and LAST_POSTS:
+        save_posts(use_kv)
     print(f"[{mode}] trend.json 저장: {len(out.get('stocks', []))}종목")
 
 if __name__ == "__main__":

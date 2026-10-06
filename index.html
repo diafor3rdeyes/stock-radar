@@ -134,6 +134,7 @@ h2{font-weight:900}
 .logo,.hero h1{font-weight:900}
 .topbar{font-weight:700}
 body{margin:0}
+.post mark{background:rgba(185,121,31,.28);color:inherit;border-radius:3px;padding:0 2px}
 </style>
 </head>
 <body>
@@ -144,8 +145,9 @@ body{margin:0}
   <h1>지금 커뮤니티에서<br>어떤 종목이 뜨고 있을까요?</h1>
   <p>디시인사이드 글을 평소 언급량과 비교해 급증한 종목부터 보여 드리고, 국민연금 공시와 AI 요약까지 한 번에 확인합니다.</p>
   <div class="tabs" role="tablist">
-    <button class="tab" role="tab" id="t-trend" aria-selected="true" aria-controls="p-trend">트렌드 알림</button>
-    <button class="tab" role="tab" id="t-rt" aria-selected="false" aria-controls="p-rt">실시간 언급</button>
+    <button class="tab" role="tab" id="t-rt" aria-selected="true" aria-controls="p-rt">실시간 언급</button>
+    <button class="tab" role="tab" id="t-sr" aria-selected="false" aria-controls="p-sr">실시간 검색</button>
+    <button class="tab" role="tab" id="t-trend" aria-selected="false" aria-controls="p-trend">트렌드 알림</button>
     <button class="tab" role="tab" id="t-nps" aria-selected="false" aria-controls="p-nps">국민연금 포착</button>
     <button class="tab" role="tab" id="t-alert" aria-selected="false" aria-controls="p-alert">내 알림</button>
     <button class="tab" role="tab" id="t-log" aria-selected="false" aria-controls="p-log">수집 로그</button>
@@ -156,7 +158,7 @@ body{margin:0}
   <span class="note" id="refresh"></span>
   <div class="banner" id="banner"></div>
 
-  <section class="panel" id="p-trend" role="tabpanel" aria-labelledby="t-trend">
+  <section class="panel" id="p-trend" role="tabpanel" aria-labelledby="t-trend" hidden>
     <div class="card" id="aicard" style="display:flex;flex-direction:column;gap:6px">
       <div class="actions" style="justify-content:space-between;flex-wrap:wrap"><h2 style="margin:0">지금 가장 핫한 주제</h2><span><span class="note" id="ai-stat"></span> <button class="btn primary" id="ai-btn">AI 지금 요약하기</button></span></div>
       <span class="note" id="ai-meta"></span>
@@ -220,12 +222,26 @@ body{margin:0}
   </section>
 
   <!-- 실시간 언급 -->
-  <section class="panel" id="p-rt" role="tabpanel" aria-labelledby="t-rt" hidden>
+  <section class="panel" id="p-rt" role="tabpanel" aria-labelledby="t-rt">
     <div class="card" style="display:flex;flex-direction:column;gap:10px">
       <div class="filters"><span class="note">기간</span><span class="seg-toggle" role="group" aria-label="기간" id="rt-seg"></span></div>
       <p class="note" id="rt-note"></p>
     </div>
     <div class="card"><div class="rows" id="rt-rows"></div></div>
+  </section>
+
+  <!-- 실시간 검색 -->
+  <section class="panel" id="p-sr" role="tabpanel" aria-labelledby="t-sr" hidden>
+    <div class="card" style="display:flex;flex-direction:column;gap:10px">
+      <label for="sr-q" class="note">검색어 (쉼표(,)로 여러 개 — 하나라도 들어간 제목을 모두 보여 줍니다)</label>
+      <div class="actions" style="flex-wrap:wrap">
+        <input id="sr-q" placeholder="예) 삼전, 하닉, 반도체" style="flex:1;min-width:200px;font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--fg)">
+        <button class="btn primary" id="sr-go">검색</button>
+      </div>
+      <div class="filters"><span class="note">기간</span><span class="seg-toggle" role="group" aria-label="검색 기간" id="sr-seg"></span></div>
+      <p class="note" id="sr-note"></p>
+    </div>
+    <div class="card" style="display:flex;flex-direction:column;gap:8px"><div id="sr-sum" class="actions" style="flex-wrap:wrap"></div><div id="sr-list" class="rows"></div></div>
   </section>
 
   <!-- 국민연금 -->
@@ -430,23 +446,25 @@ function refMin(){
   if(g) return (+g[1])*60+(+g[2]);
   var k=new Date(Date.now()+9*3600000); return k.getUTCHours()*60+k.getUTCMinutes();
 }
-function rtWin(){ var ref=refMin(); return rtH>=24?[0,1440]:[Math.max(0,ref-rtH*60),ref]; }
+function rtMax(){ return rtH*60; }   // 몇 분 전까지 셀지 (하루 = 24시간)
 function postsFor(s,rt){
-  var p=s.posts||[]; if(!rt) return p;
-  var w=rtWin();
+  var p=s.posts||[], ref=refMin();
+  if(!rt) return p.filter(function(x){ return x[4]==null || x[4]<=ref; });   // 트렌드 탭: 오늘 글만
+  var max=rtMax();
   return p.filter(function(x){
     if(!active[x[0]]) return false;
+    if(x[4]!=null) return x[4]<=max;
     var tm=x[3]||''; if(tm.length!==5) return false;
-    var v=(+tm.slice(0,2))*60+(+tm.slice(3)); return v>=w[0]&&v<=w[1];
+    var v=(+tm.slice(0,2))*60+(+tm.slice(3)); return v>=Math.max(0,ref-max)&&v<=ref;
   });
 }
 function computeRt(){
-  var w=rtWin();
+  var max=rtMax();
   var list=data.stocks.map(function(s){
     var tm=s.tm||{}, m={}, total=0, n=0;
     SOURCES.forEach(function(src){
       if(!active[src.id]) return;
-      var a=tm[src.id]||[], c=0; for(var i=0;i<a.length;i++){ if(a[i]>=w[0]&&a[i]<=w[1]) c++; }
+      var a=tm[src.id]||[], c=0; for(var i=0;i<a.length;i++){ if(a[i]<=max) c++; }
       if(c){ m[src.id]=c; total+=c; n++; }
     });
     return {s:s,m:m,total:total,base:0,ready:false,n:n,score:total};
@@ -455,12 +473,62 @@ function computeRt(){
   list.forEach(function(x,i){x.rank=i+1;});
   return list;
 }
+var srH=24, srQ='', srPosts=null, srErr='', srAt='', srMore=false, srTimer=null;
+srQ=load('sr-q',''); srH=load('sr-h',24); if([1,3,5,12,24].indexOf(srH)<0) srH=24;
+function srTerms(){
+  var seen={}, out=[];
+  String(srQ).split(/[,，、\n]+/).forEach(function(w){ w=w.trim(); var k=w.toLowerCase(); if(w&&!seen[k]){ seen[k]=1; out.push(w); } });
+  return out;
+}
+function srHl(title,terms){
+  var re=new RegExp(terms.map(function(w){return w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}).join('|'),'gi'), out='', last=0, m;
+  while((m=re.exec(title))){ if(!m[0]){re.lastIndex++;continue;} out+=esc(title.slice(last,m.index))+'<mark>'+esc(m[0])+'</mark>'; last=m.index+m[0].length; }
+  return out+esc(title.slice(last));
+}
+function loadSr(){
+  fetch('/posts.json?t='+Date.now()).then(function(r){
+    if(r.status===404){ srErr='아직 글 목록이 없습니다. 최신 stock_radar.py와 functions/posts.json.js를 올리고 "지금 수집하기"를 누른 뒤 다시 열어 주세요.'; return null; }
+    if(!r.ok){ srErr='글 목록을 불러오지 못했습니다 (HTTP '+r.status+').'; return null; }
+    return r.json();
+  }).then(function(j){ if(j){ srPosts=j; srErr=''; srAt=j.at||''; } renderSr(); }).catch(function(){ srErr='글 목록을 불러오지 못했습니다.'; renderSr(); });
+}
+function renderSr(){
+  var seg=document.getElementById('sr-seg'); if(!seg) return;
+  seg.innerHTML=RT_OPTS.map(function(o){return '<button data-sr="'+o[0]+'" aria-pressed="'+(o[0]===srH)+'">'+(o[0]===24?'24시간':o[1])+'</button>';}).join('');
+  seg.querySelectorAll('[data-sr]').forEach(function(b){ b.addEventListener('click',function(){ srH=parseInt(b.dataset.sr); save('sr-h',srH); srMore=false; renderSr(); }); });
+  var note=document.getElementById('sr-note'), sum=document.getElementById('sr-sum'), list=document.getElementById('sr-list');
+  var terms=srTerms();
+  if(srErr){ note.textContent=srErr; sum.innerHTML=''; list.innerHTML=''; return; }
+  if(!srPosts){ note.textContent='글 목록을 불러오는 중…'; sum.innerHTML=''; list.innerHTML=''; return; }
+  var all=srPosts.p||[], pool=all.filter(function(r){return r[3]<=srH*60;});
+  note.textContent='디시인사이드 5개 갤러리의 최근 '+(srH===24?'24시간':srH+'시간')+' 글 '+pool.length.toLocaleString('ko-KR')+'개 중에서 찾습니다 · 글 목록 갱신 '+(srAt?ago(srAt):'')+' · 제목에 검색어가 들어간 글만 보입니다(대소문자 구분 없음).';
+  if(!terms.length){ sum.innerHTML=''; list.innerHTML='<p class="note">검색어를 입력하세요. 여러 개는 쉼표로 이어 쓰면 됩니다.</p>'; return; }
+  var low=terms.map(function(w){return w.toLowerCase();}), cnt=low.map(function(){return 0;}), hits=[];
+  pool.forEach(function(r){
+    var tl=r[1].toLowerCase(), any=false;
+    low.forEach(function(w,i){ if(tl.indexOf(w)>=0){ cnt[i]++; any=true; } });
+    if(any) hits.push(r);
+  });
+  sum.innerHTML='<b>'+hits.length.toLocaleString('ko-KR')+'건</b> '+terms.map(function(w,i){return '<span class="badge">'+esc(w)+' '+cnt[i].toLocaleString('ko-KR')+'</span>';}).join(' ');
+  if(!hits.length){ list.innerHTML='<p class="note">이 기간에 일치하는 글이 없습니다.</p>'; return; }
+  var ref=refMin(), lim=srMore?500:100, show=hits.slice(0,lim);
+  list.innerHTML=show.map(function(r){
+    var isY = r[3] > ((function(){var k=new Date(Date.now()+9*3600000);return k.getUTCHours()*60+k.getUTCMinutes();})());
+    var url='https://gall.dcinside.com'+r[2];
+    return '<div class="post" style="padding:6px 2px"><span class="src">'+esc(srcLabel(r[0]))+' · '+(isY?'어제 ':'')+esc(r[4])+'</span><a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+srHl(r[1],terms)+'</a></div>';
+  }).join('')+(hits.length>lim?(srMore?'':'<button class="btn" id="sr-more" style="align-self:flex-start;margin-top:6px">더보기 ('+(hits.length-lim).toLocaleString('ko-KR')+'건 더, 최대 500건까지)</button>'):'');
+  var mb=document.getElementById('sr-more'); if(mb) mb.addEventListener('click',function(){ srMore=true; renderSr(); });
+}
+function srStart(){
+  loadSr(); if(srTimer) clearInterval(srTimer);
+  srTimer=setInterval(function(){ if(!document.getElementById('p-sr').hidden) loadSr(); },60000);
+}
 function renderRt(){
   var seg=document.getElementById('rt-seg'); if(!seg) return;
   seg.innerHTML=RT_OPTS.map(function(o){return '<button data-rt="'+o[0]+'" aria-pressed="'+(o[0]===rtH)+'">'+o[1]+'</button>';}).join('');
   seg.querySelectorAll('[data-rt]').forEach(function(b){ b.addEventListener('click',function(){ rtH=parseInt(b.dataset.rt); save('sr-rt',rtH); renderAll(); }); });
-  var w=rtWin(), hm=function(v){ return ('0'+Math.floor(v/60)).slice(-2)+':'+('0'+(v%60)).slice(-2); };
-  document.getElementById('rt-note').textContent='디시인사이드 글의 작성 시각 기준, '+(rtH>=24?'오늘 하루':'최근 '+rtLabel()+' ('+hm(w[0])+'~'+hm(w[1])+')')+' 동안 가장 많이 언급된 순서입니다. 제거한 단어·연결한 줄임말·커뮤니티 체크(트렌드 알림 탭)가 그대로 적용됩니다. FM코리아·네이버 붙여넣기는 글 시각이 없어 여기서는 제외됩니다. 오늘 0시 이후 글만 셉니다.';
+  var ref=refMin(), hm=function(v){ v=((v%1440)+1440)%1440; return ('0'+Math.floor(v/60)).slice(-2)+':'+('0'+(v%60)).slice(-2); };
+  document.getElementById('rt-note').textContent='디시인사이드 글의 작성 시각 기준, 지금('+hm(ref)+')부터 '+rtLabel().replace('하루','24시간')+' 전('+hm(ref-rtMax())+')까지 가장 많이 언급된 순서입니다. 자정을 넘어도 전날 글까지 이어서 셉니다. 제거한 단어·연결한 줄임말·커뮤니티 체크(트렌드 알림 탭)가 그대로 적용됩니다. FM코리아·네이버 붙여넣기는 글 시각이 없어 여기서는 제외됩니다.';
   if(data.isSample){ document.getElementById('rt-rows').innerHTML='<p class="note">샘플 화면에서는 실시간 언급이 나오지 않습니다.</p>'; return; }
   renderRows(computeRt(),'rt-rows',true);
 }
@@ -476,7 +544,7 @@ function postsHtml(s,key,rt){
   var items=shown.map(function(x){
     var ok=/^https:\/\/gall\.dcinside\.com\//.test(x[2]||'');
     var t=esc(x[1]);
-    return '<div class="post"><span class="src">'+esc(srcLabel(x[0]))+(x[3]?' · '+esc(x[3]):'')+'</span>'+(ok?'<a href="'+esc(x[2])+'" target="_blank" rel="noopener noreferrer">'+t+'</a>':'<span>'+t+'</span>')+'</div>';
+    return '<div class="post"><span class="src">'+esc(srcLabel(x[0]))+(x[3]?' · '+(x[4]!=null&&x[4]>refMin()?'어제 ':'')+esc(x[3]):'')+'</span>'+(ok?'<a href="'+esc(x[2])+'" target="_blank" rel="noopener noreferrer">'+t+'</a>':'<span>'+t+'</span>')+'</div>';
   }).join('');
   var more=p.length>10?'<button class="btn" data-more="'+esc(key)+'" style="align-self:flex-start;margin-top:4px">'+(morePosts[key]?'접기':'더보기 ('+(p.length-10)+'건 더)')+'</button>':'';
   return '<div class="posts"><div class="note" style="margin-bottom:2px">'+(rt?'최근 '+rtLabel()+' 동안 이 단어가 들어간 글 (':'오늘 이 단어가 들어간 글 (')+(morePosts[key]?'최근 '+p.length:'최근 '+shown.length+' / 전체 '+p.length)+'건) · 제목을 누르면 원문으로 이동합니다</div>'+items+more+'</div>';
@@ -896,6 +964,11 @@ document.querySelectorAll('.tab').forEach(function(t){
     });
   });
 });
+document.getElementById('t-sr').addEventListener('click',function(){ srStart(); });
+document.getElementById('sr-q').value=srQ;
+document.getElementById('sr-q').addEventListener('input',function(e){ srQ=e.target.value; save('sr-q',srQ); srMore=false; renderSr(); });
+document.getElementById('sr-q').addEventListener('keydown',function(e){ if(e.key==='Enter') renderSr(); });
+document.getElementById('sr-go').addEventListener('click',function(){ loadSr(); });
 document.getElementById('showCand').checked=showCand;
 document.getElementById('sort-buzz').setAttribute('aria-pressed',sortBy==='buzz');
 document.getElementById('sort-chg').setAttribute('aria-pressed',sortBy==='chg');
