@@ -40,7 +40,7 @@ jobs:
             python stock_radar.py
           fi
 
-    - name: KV에 올리기
+      - name: KV에 올리기
         run: |
           KV="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/storage/kv/namespaces/$CF_KV_NAMESPACE_ID/values"
           code=$(curl -s -o resp.txt -w "%{http_code}" -X PUT -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: text/plain" --data-binary @trend.json "$KV/trend")
