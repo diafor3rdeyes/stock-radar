@@ -191,7 +191,7 @@ def update_history(today_counts):
     json.dump(hist, open("history.json", "w", encoding="utf-8"), ensure_ascii=False)
     return hist
 
-def baseline(hist, name):
+def baseline(hist, name, extra=()):
     """오늘을 뺀 최근 BASE_DAYS일 하루 총량의 출처별 평균 × 오늘 지난 시간 비율. 기록 없으면 None.
     (오늘은 아직 진행 중이라, 평소 총량도 지금 시각까지의 몫으로 맞춰 비교한다.)"""
     now = now_kst()
@@ -202,8 +202,9 @@ def baseline(hist, name):
     frac = max(0.15, min(1.0, (now.hour + now.minute / 60) / 24))
     acc = defaultdict(float)
     for d in days:
-        for src, v in (hist[d]["tot"].get(name) or {}).items():   # 그날 기록에 없으면 0건이었다는 뜻
-            acc[src] += v
+        for key in (name, *extra):    # extra = 이 종목으로 연결한 줄임말의 지난 기록도 합친다
+            for src, v in (hist[d]["tot"].get(key) or {}).items():   # 그날 기록에 없으면 0건이었다는 뜻
+                acc[src] += v
     return {src: round(v / len(days) * frac, 1) for src, v in acc.items()}
 
 # ---------- 내가 연결한 줄임말 (화면에서 저장 → 클라우드플레어 KV → aliases.json) ----------
@@ -499,6 +500,7 @@ def collect_trend(out, old):
             counts[name][sid] = v
         for w, c in candidates(titles, known).items():
             wc.setdefault(w, {})[sid] = c
+    amap = load_alias_map()
     cand = {w: m for w, m in wc.items() if sum(m.values()) >= MIN_CAND}
     cand = dict(sorted(cand.items(), key=lambda kv: -sum(kv[1].values()))[:300])
     hist = update_history({**counts, **cand})
@@ -509,7 +511,7 @@ def collect_trend(out, old):
         if sum(m.values()) > 0:
             s = {"name": name, "code": code, "tv": tv, "aliases": aliases,
                  "prev": prev_rank.get(name), "m": m}
-            b = baseline(hist, name)
+            b = baseline(hist, name, [a for a, v in amap.items() if (v.get("name") or "").strip() == name and a != name])
             if b is not None:
                 s["b"] = b
             stocks.append(s)
