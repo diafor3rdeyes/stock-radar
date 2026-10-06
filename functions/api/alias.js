@@ -26,11 +26,21 @@ export async function onRequestPost({ request, env }) {
   try { b = await request.json(); } catch { return json({ ok: false, error: "bad_json" }, 400); }
   // AI 잔액 입력: 입력한 시점의 잔액과 그때까지 쓴 누적 금액을 같이 저장해 두면, 이후 쓴 만큼 빼서 남은 금액을 계산한다
   if (b.budget !== undefined) {
-    const amount = Number(b.budget.amount), usdAtSet = Number(b.budget.usdAtSet || 0);
-    if (!isFinite(amount) || amount < 0 || amount > 100000 || !isFinite(usdAtSet) || usdAtSet < 0) {
-      return json({ ok: false, error: "금액이 올바르지 않습니다" }, 400);
+    let cur = {};
+    try { cur = JSON.parse((await env.RADAR.get("aibudget")) || "{}"); } catch { cur = {}; }
+    const rec = { amount: Number(cur.amount || 0), usdAtSet: Number(cur.usdAtSet || 0), adj: Number(cur.adj || 0), setAt: cur.setAt || null };
+    const ok = (v) => isFinite(v) && v >= 0 && v <= 100000;
+    if (b.budget.amount !== undefined) {
+      const amount = Number(b.budget.amount), usdAtSet = Number(b.budget.usdAtSet || 0);
+      if (!ok(amount) || !ok(usdAtSet)) return json({ ok: false, error: "금액이 올바르지 않습니다" }, 400);
+      rec.amount = amount; rec.usdAtSet = usdAtSet; rec.setAt = new Date().toISOString();
     }
-    const rec = { amount, usdAtSet, setAt: new Date().toISOString() };
+    if (b.budget.adj !== undefined) {
+      // 실제로 쓴 돈과 화면 추정치의 차이(기능을 켜기 전에 쓴 돈 등). 마이너스도 허용.
+      const adj = Number(b.budget.adj);
+      if (!isFinite(adj) || Math.abs(adj) > 100000) return json({ ok: false, error: "금액이 올바르지 않습니다" }, 400);
+      rec.adj = adj;
+    }
     await env.RADAR.put("aibudget", JSON.stringify(rec));
     return json({ ok: true, budget: rec });
   }
