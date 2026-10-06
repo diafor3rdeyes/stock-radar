@@ -401,7 +401,7 @@ var showCand = true, data = SAMPLE, active = {}, watch = {}, prefs = {jump:3, on
 SOURCES.forEach(function(s){active[s.id]=true;});
 function load(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch(e){return d;}}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
-rtH = load('sr-rt',1); if([1,3,5,12,24].indexOf(rtH)<0) rtH=1; watch = load('sr-watch',{}); prefs = load('sr-prefs',prefs); fm = load('sr-fm',{}); fmBase = load('sr-fmbase',{}); nv = load('sr-nv',{}); nvBase = load('sr-nvbase',{});
+rtH = load('sr-rtm',60); if([20,60,180,300,720,1440].indexOf(rtH)<0) rtH=60; watch = load('sr-watch',{}); prefs = load('sr-prefs',prefs); fm = load('sr-fm',{}); fmBase = load('sr-fmbase',{}); nv = load('sr-nv',{}); nvBase = load('sr-nvbase',{});
 (function(){ var f=load('sr-filter',null); if(!f) return;
   if(f.active) SOURCES.forEach(function(s){ if(f.active[s.id]===false) active[s.id]=false; });
   if(f.sortBy) sortBy=f.sortBy; if(typeof f.showCand==='boolean') showCand=f.showCand; })();
@@ -449,14 +449,15 @@ function renderFilters(){
 }
 var openPosts = {}, morePosts = {};
 function srcLabel(id){ var f=SOURCES.filter(function(x){return x.id===id;})[0]; return f?f.name.replace('디시 ',''):id; }
-var RT_OPTS=[[1,'1시간'],[3,'3시간'],[5,'5시간'],[12,'12시간'],[24,'하루']], rtH;
+var RT_OPTS=[[20,'20분'],[60,'1시간'],[180,'3시간'],[300,'5시간'],[720,'12시간'],[1440,'하루']], rtH;
+function rtLabelOf(v){ return RT_OPTS.filter(function(o){return o[0]===v;})[0][1]; }
 function rtLabel(){ return RT_OPTS.filter(function(o){return o[0]===rtH;})[0][1]; }
 function refMin(){
   var g=String(data.generatedAt||'').match(/(\d\d):(\d\d)$/);
   if(g) return (+g[1])*60+(+g[2]);
   var k=new Date(Date.now()+9*3600000); return k.getUTCHours()*60+k.getUTCMinutes();
 }
-function rtMax(){ return rtH*60; }   // 몇 분 전까지 셀지 (하루 = 24시간)
+function rtMax(){ return rtH; }   // 몇 분 전까지 셀지 (하루 = 24시간)
 function postsFor(s,rt){
   var p=s.posts||[], ref=refMin();
   if(!rt) return p.filter(function(x){ return x[4]==null || x[4]<=ref; });   // 트렌드 탭: 오늘 글만
@@ -483,8 +484,8 @@ function computeRt(){
   list.forEach(function(x,i){x.rank=i+1;});
   return list;
 }
-var srH=24, srQ='', srPosts=null, srErr='', srAt='', srMore=false, srTimer=null;
-srQ=load('sr-q',''); srH=load('sr-h',24); if([1,3,5,12,24].indexOf(srH)<0) srH=24;
+var srH=1440, srQ='', srPosts=null, srErr='', srAt='', srMore=false, srTimer=null;
+srQ=load('sr-q',''); srH=load('sr-hm',1440); if([20,60,180,300,720,1440].indexOf(srH)<0) srH=1440;
 function srTerms(){
   var seen={}, out=[];
   String(srQ).split(/[,，、\n]+/).forEach(function(w){ w=w.trim(); var k=w.toLowerCase(); if(w&&!seen[k]){ seen[k]=1; out.push(w); } });
@@ -504,14 +505,14 @@ function loadSr(){
 }
 function renderSr(){
   var seg=document.getElementById('sr-seg'); if(!seg) return;
-  seg.innerHTML=RT_OPTS.map(function(o){return '<button data-sr="'+o[0]+'" aria-pressed="'+(o[0]===srH)+'">'+(o[0]===24?'24시간':o[1])+'</button>';}).join('');
-  seg.querySelectorAll('[data-sr]').forEach(function(b){ b.addEventListener('click',function(){ srH=parseInt(b.dataset.sr); save('sr-h',srH); srMore=false; renderSr(); }); });
+  seg.innerHTML=RT_OPTS.map(function(o){return '<button data-sr="'+o[0]+'" aria-pressed="'+(o[0]===srH)+'">'+(o[0]===1440?'24시간':o[1])+'</button>';}).join('');
+  seg.querySelectorAll('[data-sr]').forEach(function(b){ b.addEventListener('click',function(){ srH=parseInt(b.dataset.sr); save('sr-hm',srH); srMore=false; renderSr(); }); });
   var note=document.getElementById('sr-note'), sum=document.getElementById('sr-sum'), list=document.getElementById('sr-list');
   var terms=srTerms();
   if(srErr){ note.textContent=srErr; sum.innerHTML=''; list.innerHTML=''; return; }
   if(!srPosts){ note.textContent='글 목록을 불러오는 중…'; sum.innerHTML=''; list.innerHTML=''; return; }
-  var all=srPosts.p||[], pool=all.filter(function(r){return r[3]<=srH*60;});
-  note.textContent='디시인사이드 5개 갤러리의 최근 '+(srH===24?'24시간':srH+'시간')+' 글 '+pool.length.toLocaleString('ko-KR')+'개 중에서 찾습니다 · 글 목록 갱신 '+(srAt?ago(srAt):'')+' · 제목에 검색어가 들어간 글만 보입니다(대소문자 구분 없음).';
+  var all=srPosts.p||[], pool=all.filter(function(r){return r[3]<=srH;});
+  note.textContent='디시인사이드 5개 갤러리의 최근 '+(srH===1440?'24시간':rtLabelOf(srH))+' 글 '+pool.length.toLocaleString('ko-KR')+'개 중에서 찾습니다 · 글 목록 갱신 '+(srAt?ago(srAt):'')+' · 제목에 검색어가 들어간 글만 보입니다(대소문자 구분 없음).';
   if(!terms.length){ sum.innerHTML=''; list.innerHTML='<p class="note">검색어를 입력하세요. 여러 개는 쉼표로 이어 쓰면 됩니다.</p>'; return; }
   var low=terms.map(function(w){return w.toLowerCase();}), cnt=low.map(function(){return 0;}), hits=[];
   pool.forEach(function(r){
@@ -536,7 +537,7 @@ function srStart(){
 function renderRt(){
   var seg=document.getElementById('rt-seg'); if(!seg) return;
   seg.innerHTML=RT_OPTS.map(function(o){return '<button data-rt="'+o[0]+'" aria-pressed="'+(o[0]===rtH)+'">'+o[1]+'</button>';}).join('');
-  seg.querySelectorAll('[data-rt]').forEach(function(b){ b.addEventListener('click',function(){ rtH=parseInt(b.dataset.rt); save('sr-rt',rtH); renderAll(); }); });
+  seg.querySelectorAll('[data-rt]').forEach(function(b){ b.addEventListener('click',function(){ rtH=parseInt(b.dataset.rt); save('sr-rtm',rtH); renderAll(); }); });
   var ref=refMin(), hm=function(v){ v=((v%1440)+1440)%1440; return ('0'+Math.floor(v/60)).slice(-2)+':'+('0'+(v%60)).slice(-2); };
   document.getElementById('rt-note').textContent='디시인사이드 글의 작성 시각 기준, 지금('+hm(ref)+')부터 '+rtLabel().replace('하루','24시간')+' 전('+hm(ref-rtMax())+')까지 가장 많이 언급된 순서입니다. 자정을 넘어도 전날 글까지 이어서 셉니다. 제거한 단어·연결한 줄임말·커뮤니티 체크(트렌드 알림 탭)가 그대로 적용됩니다. FM코리아·네이버 붙여넣기는 글 시각이 없어 여기서는 제외됩니다. 잘못 뺀 단어는 트렌드 알림 탭 아래 "제거할 단어"에서 되돌릴 수 있습니다.';
   if(data.isSample){ document.getElementById('rt-rows').innerHTML='<p class="note">샘플 화면에서는 실시간 언급이 나오지 않습니다.</p>'; return; }
