@@ -7,6 +7,14 @@ function json(body, status = 200) {
   });
 }
 
+export async function onRequestGet({ env }) {
+  if (!env.RADAR) return json({ ok: false, error: "not_configured" }, 503);
+  let map = {}, stop = [];
+  try { map = JSON.parse((await env.RADAR.get("aliases")) || "{}"); } catch { map = {}; }
+  try { stop = JSON.parse((await env.RADAR.get("stopwords")) || "[]"); } catch { stop = []; }
+  return json({ ok: true, map, stop });
+}
+
 export async function onRequestPost({ request, env }) {
   const origin = request.headers.get("Origin");
   if (origin && new URL(origin).host !== new URL(request.url).host) {
