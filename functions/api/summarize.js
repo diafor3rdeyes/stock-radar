@@ -23,6 +23,12 @@ export async function onRequestPost({ request, env }) {
   }
   await env.RADAR.put("ai_last", String(now), { expirationTtl: 600 });
 
+  // 실시간 언급 탭에서 누르면 {minutes}가 같이 온다 → 그 기간(분)만 요약하도록 KV에 적어 둔다. 없으면 기존처럼 오늘 전체 요약.
+  let minutes = 0;
+  try { const b = await request.json(); minutes = Number(b && b.minutes) || 0; } catch { minutes = 0; }
+  if ([20, 60, 180, 300, 720, 1440].includes(minutes)) await env.RADAR.put("ai_window", String(minutes), { expirationTtl: 900 });
+  else await env.RADAR.delete("ai_window");
+
   const repo = env.GH_REPO || "diafor3rdeyes/stock-radar";
   const r = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/radar.yml/dispatches`, {
     method: "POST",
