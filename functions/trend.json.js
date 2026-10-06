@@ -13,6 +13,7 @@ export async function onRequest({ env }) {
     j.aliasMap = a ? JSON.parse(a) : {};
     j.stopWords = s ? JSON.parse(s) : [];
     j.listsLive = true;
+    try { const bg = await env.RADAR.get("aibudget"); j.aiBudget = bg ? JSON.parse(bg) : null; } catch { j.aiBudget = null; }
     j.aiRequestedAt = Number((await env.RADAR.get("ai_last")) || 0);       // 마지막 AI 요약 요청 시각
     j.refreshAt = Number((await env.RADAR.get("refresh_last")) || 0);   // 마지막으로 수집을 요청한 시각
     return new Response(JSON.stringify(j), { headers: H });
