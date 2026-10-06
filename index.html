@@ -101,9 +101,9 @@ textarea{width:100%;min-height:96px;box-sizing:border-box;font:inherit;font-size
 @media (prefers-reduced-motion:no-preference){.seg{transition:width .25s}}
 body{margin:0}
 </style>
-
 </head>
 <body>
+
 <div class="wrap">
   <div class="top">
     <h1>종목 레이더</h1>
@@ -128,6 +128,7 @@ body{margin:0}
           <button id="sort-buzz" aria-pressed="true">화제성순</button>
           <button id="sort-chg" aria-pressed="false">등락률순</button>
         </span>
+        <label class="chip"><input type="checkbox" id="showCand" checked>줄임말·신조어 후보 포함</label>
       </div>
       <p class="note">체크를 끄면 그 커뮤니티를 뺀 순위와 비중으로 바로 다시 계산합니다.</p>
     </div>
@@ -138,10 +139,23 @@ body{margin:0}
       <textarea id="fmtext" placeholder="예) 하닉 또 신고가네&#10;삼전 외인 순매수 전환"></textarea>
       <div class="actions"><button class="btn primary" id="fm-add">집계해서 반영</button><button class="btn" id="fm-clear">초기화</button><span class="note" id="fm-msg"></span></div>
     </div>
+    <div class="card" id="aliasbox" hidden style="display:none;flex-direction:column;gap:8px">
+      <h2 id="alias-title">풀네임 연결</h2>
+      <p class="note">이 줄임말이 어느 종목인지 적어 주세요. 저장하면 다음 집계부터 그 종목의 언급으로 합쳐지고, 시세와 차트가 붙습니다. 종목코드는 한국 종목은 숫자 6자리(예 035720), 미국 종목은 티커(예 AAPL)입니다. 이미 있는 종목(예 SK하이닉스)은 코드를 비워도 됩니다.</p>
+      <div class="actions" style="flex-wrap:wrap">
+        <input id="al-name" placeholder="풀네임 (예 카카오)" style="flex:1;min-width:150px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg)">
+        <input id="al-code" placeholder="종목코드/티커" style="width:140px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg)">
+        <button class="btn primary" id="al-save">저장하고 반영</button>
+        <button class="btn" id="al-cancel">닫기</button>
+      </div>
+      <datalist id="al-list"></datalist>
+      <span class="note" id="al-msg"></span>
+    </div>
     <div class="card">
       <div class="legend" id="legend" style="margin-bottom:8px"></div>
       <div class="rows" id="rows"></div>
     </div>
+    <div class="card" id="amapcard" style="display:none"><h2>내가 연결한 줄임말</h2><div id="amap"></div></div>
     <p class="note">화제성 점수 = (지금 언급 수 − 평소 언급 수) ÷ √(평소 + 1) × (1 + 0.15 × 언급된 커뮤니티 수 − 0.15). 어제도 오늘도 50건이면 0점이고, 평소 1건이던 종목이 50건이 되면 약 35점이라 크게 앞섭니다. 평소는 최근 7일 평균입니다. FM코리아는 직전에 붙여넣은 값이 평소가 됩니다.</p>
   </section>
 
@@ -279,7 +293,7 @@ var SAMPLE = {
     ['대상','001680',347483,'2026-07-01'],['에코프로머티','450080',63657,'2026-07-01']
   ]
 };
-var data = SAMPLE, active = {}, watch = {}, prefs = {jump:3, onlyMulti:false}, fm = {}, fmBase = {}, sortBy = 'buzz';
+var showCand = true, data = SAMPLE, active = {}, watch = {}, prefs = {jump:3, onlyMulti:false}, fm = {}, fmBase = {}, sortBy = 'buzz';
 SOURCES.forEach(function(s){active[s.id]=true;});
 function load(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch(e){return d;}}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
@@ -297,14 +311,16 @@ function compute(){
     var surge = ready ? Math.max(0,(total-base)/Math.sqrt(base+1)) : total*0.05;
     var score = surge*(1+0.15*Math.max(n-1,0));
     return {s:s,m:m,total:total,base:base,ready:ready,n:n,score:score};
-  }).filter(function(x){return x.total>0;});
+  }).filter(function(x){return x.total>0 && (showCand || !x.s.cand);});
   list.sort(function(a,b){return (b.score-a.score)||(b.total-a.total);});
   list.forEach(function(x,i){x.rank=i+1;});
   return list;
 }
+function wk(s){return s.cand?s.name:s.code;}
 function esc(t){return String(t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function tvUrl(sym){return 'https://www.tradingview.com/chart/?symbol='+encodeURIComponent(sym);}
 function pxHtml(s){
+  if(s.cand) return '<span class="px flat">후보 단어</span>';
   if(typeof s.chg!=='number') return '<span class="px flat">시세 대기</span>';
   var c = s.chg>0?'up':s.chg<0?'down':'flat';
   var t = (s.chg>0?'+':'')+s.chg.toFixed(2)+'%';
@@ -326,7 +342,7 @@ function renderFilters(){
 function renderRows(list){
   var el=document.getElementById('rows');
   if(!list.length){el.innerHTML='<p class="note">선택한 커뮤니티에서 집계된 종목이 없습니다.</p>';return;}
-  var view = list.slice(0,10);
+  var view = list.slice(0,15);
   if(sortBy==='chg') view = view.slice().sort(function(a,b){return (b.s.chg==null?-99:b.s.chg)-(a.s.chg==null?-99:a.s.chg);});
   el.innerHTML = view.map(function(x){
     var s=x.s, d = s.prev==null ? null : s.prev - x.rank;
@@ -339,11 +355,12 @@ function renderRows(list){
       return '<div class="seg" title="'+src.name+' '+p.toFixed(1)+'% ('+x.m[src.id]+'건)" style="width:'+p+'%;background:'+src.color+'">'+(p>=11?Math.round(p)+'%':'')+'</div>';
     }).join('');
     return '<div class="row"><div class="rank">'+x.rank+'</div>'+
-      '<div><div class="name"><button class="star" data-w="'+esc(s.code)+'" aria-pressed="'+(!!watch[s.code])+'" aria-label="'+esc(s.name)+' 관심 종목">'+(watch[s.code]?'★':'☆')+'</button>'+esc(s.name)+' <span class="code">'+esc(s.code)+'</span></div>'+
+      '<div><div class="name"><button class="star" data-w="'+esc(wk(s))+'" aria-pressed="'+(!!watch[wk(s)])+'" aria-label="'+esc(s.name)+' 관심 종목">'+(watch[wk(s)]?'★':'☆')+'</button>'+esc(s.name)+' <span class="code">'+esc(s.code)+'</span></div>'+
       '<div class="meta">'+(x.ready?'평소 '+x.base+' → 지금 '+x.total+'건 (×'+(x.total/Math.max(x.base,1)).toFixed(1)+') · 점수 '+x.score.toFixed(0):'평소 기준 수집 중 · 언급 '+x.total+'건')+' &nbsp;'+delta+' '+hot+' '+multi+'</div></div>'+
       '<div class="bar" role="img" aria-label="출처별 언급 비중">'+segs+'</div>'+
-      '<div class="actions">'+pxHtml(s)+'<a class="btn primary" href="'+tvUrl(s.tv)+'" target="_blank" rel="noopener">차트 분석</a></div></div>';
+      '<div class="actions">'+pxHtml(s)+(s.cand?'<button class="btn primary" data-al="'+esc(s.name)+'">풀네임 연결</button>':(s.tv?'<a class="btn primary" href="'+tvUrl(s.tv)+'" target="_blank" rel="noopener">차트 분석</a>':'<a class="btn" href="https://search.naver.com/search.naver?query='+encodeURIComponent(s.name+' 주가')+'" target="_blank" rel="noopener">주가 검색</a>'))+'</div></div>';
   }).join('');
+  el.querySelectorAll('[data-al]').forEach(function(b){ b.addEventListener('click',function(){ openAlias(b.dataset.al); }); });
   el.querySelectorAll('.star').forEach(function(b){
     b.addEventListener('click',function(){
       var c=b.dataset.w; if(watch[c]) delete watch[c]; else watch[c]=true;
@@ -354,13 +371,13 @@ function renderRows(list){
 function renderAlerts(list){
   var out=list.filter(function(x){
     var d = x.s.prev==null ? 99 : x.s.prev-x.rank;
-    return d>=prefs.jump && (!prefs.onlyMulti || x.n>=2);
+    return !x.s.cand && d>=prefs.jump && (!prefs.onlyMulti || x.n>=2);
   });
   document.getElementById('alerts').innerHTML = out.length ? out.map(function(x){
     var d = x.s.prev==null ? '신규 진입' : '▲'+(x.s.prev-x.rank)+'칸 상승';
     return '<div class="alert"><b>'+esc(x.s.name)+'</b><span class="code">'+esc(x.s.code)+'</span><span class="delta up">'+d+'</span>'+pxHtml(x.s)+'<a class="btn" style="margin-left:auto" href="'+tvUrl(x.s.tv)+'" target="_blank" rel="noopener">차트</a></div>';
   }).join('') : '<p class="note">조건에 맞는 종목이 없습니다.</p>';
-  var w=list.filter(function(x){return watch[x.s.code];});
+  var w=list.filter(function(x){return watch[wk(x.s)];});
   document.getElementById('watch').innerHTML = w.length ? w.map(function(x){
     return '<div class="alert"><b>'+x.rank+'위 '+esc(x.s.name)+'</b><span class="code">'+esc(x.s.code)+'</span><span class="meta">언급 '+x.total+'건</span>'+pxHtml(x.s)+'</div>';
   }).join('') : '트렌드 탭에서 별(☆)을 누르면 여기에 모입니다.';
@@ -446,7 +463,7 @@ function head(){
   rf.textContent = '언급 집계와 시세는 평일 10분마다, 국민연금 공시는 매일 09·15·21시에 갱신 · 이 화면은 '+left+'초 뒤 다시 읽습니다'+warn;
   document.getElementById('banner').textContent = data.isSample
     ? '커뮤니티 순위, 비중, 등락률은 화면 확인용 샘플 숫자입니다. 실제 값이 아닙니다. stock_radar.py를 실행해 trend.json을 만들면 실제 값으로 바뀝니다.'
-    : '시세는 무료 시세원 기준이라 종목에 따라 지연될 수 있습니다. '+((data.skipped||[]).length ? '수집 제외: '+data.skipped.join(', ') : '');
+    : '시세는 무료 시세원 기준이라 종목에 따라 지연될 수 있습니다. '+(data.titleCount?'오늘 수집한 글: '+Object.keys(data.titleCount).map(function(k){return k+' '+data.titleCount[k].toLocaleString('ko-KR')+'개';}).join(' · ')+'. ':'')+((data.skipped||[]).length ? '수집 제외: '+data.skipped.join(', ') : '');
 }
 var refreshing = false;
 function setStat(t){ document.getElementById('refstat').textContent = t; }
@@ -463,14 +480,45 @@ function requestRefresh(){
     if(x.status===404 || x.status===503){ setStat('수집 요청 설정 전이라 화면만 새로 읽었습니다.'); pull(); endRefresh(); return; }
     if(x.status===429){ setStat('방금 요청이 있었습니다. '+(x.j.wait||60)+'초 뒤 다시 눌러 주세요.'); pull(); endRefresh(); return; }
     if(!x.j.ok){ setStat('수집 요청에 실패했습니다. 화면만 새로 읽었습니다.'); pull(); endRefresh(); return; }
-    setStat('수집 시작됨. 보통 1~2분 걸립니다…');
+    setStat('수집 시작됨. 페이지를 모두 읽느라 보통 2~4분 걸립니다…');
     var tries = 0;
     var iv = setInterval(function(){
       tries++; pull();
       if((data.generatedISO||'') !== before){ clearInterval(iv); setStat('반영 완료'); endRefresh(); }
-      else if(tries >= 36){ clearInterval(iv); setStat('3분이 지나도 안 바뀌었습니다. 깃허브 Actions를 확인하세요.'); endRefresh(); }
+      else if(tries >= 72){ clearInterval(iv); setStat('6분이 지나도 안 바뀌었습니다. 깃허브 Actions를 확인하세요.'); endRefresh(); }
     }, 5000);
   }).catch(function(){ setStat('수집 요청을 보내지 못했습니다.'); pull(); endRefresh(); });
+}
+var aliasMap = {}, alAbbr = '';
+function aliasBox(show){ var b=document.getElementById('aliasbox'); b.hidden=!show; b.style.display=show?'flex':'none'; }
+function openAlias(abbr){
+  alAbbr=abbr;
+  document.getElementById('alias-title').textContent='"'+abbr+'" 의 풀네임 연결';
+  document.getElementById('al-name').value=''; document.getElementById('al-code').value='';
+  document.getElementById('al-msg').textContent='';
+  var dl=document.getElementById('al-list'); dl.innerHTML=(data.dict||[]).map(function(d){return '<option value="'+esc(d.name)+'">';}).join('');
+  document.getElementById('al-name').setAttribute('list','al-list');
+  aliasBox(true); document.getElementById('al-name').focus();
+  document.getElementById('aliasbox').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function sendAlias(body,done){
+  fetch('/api/alias',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    return r.json().catch(function(){return {};}).then(function(j){return {status:r.status,j:j};});
+  }).then(function(x){
+    if(x.status===404||x.status===503){ done('저장 기능이 아직 설정되지 않았습니다(서버 연결 필요).',false); return; }
+    if(!x.j.ok){ done('저장하지 못했습니다: '+(x.j.error||x.status),false); return; }
+    aliasMap=x.j.map||{}; renderAmap(); done('저장했습니다.',true);
+  }).catch(function(){ done('저장 요청을 보내지 못했습니다.',false); });
+}
+function renderAmap(){
+  var keys=Object.keys(aliasMap), card=document.getElementById('amapcard');
+  card.style.display=keys.length?'block':'none';
+  document.getElementById('amap').innerHTML=keys.map(function(k){
+    var v=aliasMap[k]; return '<div class="alert"><b>'+esc(k)+'</b> → '+esc(v.name)+' <span class="code">'+esc(v.code||'')+'</span><button class="btn" style="margin-left:auto" data-rm="'+esc(k)+'">삭제</button></div>';
+  }).join('');
+  document.querySelectorAll('[data-rm]').forEach(function(b){ b.addEventListener('click',function(){
+    sendAlias({abbr:b.dataset.rm,remove:true},function(t){ setStat(t+' 삭제는 다음 집계부터 반영됩니다.'); });
+  }); });
 }
 function countFm(){
   var lines=document.getElementById('fmtext').value.split('\n').map(function(l){return l.trim();}).filter(Boolean);
@@ -507,6 +555,17 @@ document.getElementById('onlyMulti').checked=prefs.onlyMulti;
 document.getElementById('jump').addEventListener('input',function(e){prefs.jump=Math.max(1,parseInt(e.target.value)||3);save('sr-prefs',prefs);renderAll();});
 document.getElementById('onlyMulti').addEventListener('change',function(e){prefs.onlyMulti=e.target.checked;save('sr-prefs',prefs);renderAll();});
 document.getElementById('fm-add').addEventListener('click',countFm);
+document.getElementById('showCand').addEventListener('change',function(e){showCand=e.target.checked;renderAll();});
+document.getElementById('al-cancel').addEventListener('click',function(){aliasBox(false);});
+document.getElementById('al-save').addEventListener('click',function(){
+  var name=document.getElementById('al-name').value.trim(), code=document.getElementById('al-code').value.trim(), msg=document.getElementById('al-msg');
+  if(!name){ msg.textContent='풀네임을 적어 주세요.'; return; }
+  msg.textContent='저장하는 중…';
+  sendAlias({abbr:alAbbr,name:name,code:code},function(t,ok){
+    msg.textContent=t;
+    if(ok){ aliasBox(false); setStat('연결 저장됨. 집계를 다시 돌립니다…'); requestRefresh(); }
+  });
+});
 document.getElementById('fm-clear').addEventListener('click',function(){fm={};fmBase={};save('sr-fm',fm);save('sr-fmbase',fmBase);document.getElementById('fmtext').value='';document.getElementById('fm-msg').textContent='';renderAll();});
 ['buzz','chg'].forEach(function(k){
   document.getElementById('sort-'+k).addEventListener('click',function(){
@@ -519,7 +578,8 @@ document.getElementById('fm-clear').addEventListener('click',function(){fm={};fm
 function pull(){
   try{ fetch('trend.json?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(j&&j.stocks){
-      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
+      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
+      aliasMap=j.aliasMap||aliasMap; renderAmap();
       ensureDictStocks(); head(); renderNps(); renderAll();
     }
   }).catch(function(){}); }catch(e){}
@@ -531,5 +591,6 @@ function pull(){
   setInterval(function(){ left--; if(left<=0){ pull(); left=POLL; } head(); },1000);
 })();
 </script>
+
 </body>
 </html>

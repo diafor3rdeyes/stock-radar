@@ -17,7 +17,7 @@ robots.txt가 허용하지 않는 사이트(FM코리아 등)는 건너뜁니다.
 """
 import json, os, re, sys, time, datetime, urllib.robotparser
 from zoneinfo import ZoneInfo
-from collections import defaultdict
+from collections import defaultdict, Counter
 from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
@@ -28,8 +28,10 @@ def now_kst():
 
 UA = "Mozilla/5.0 (compatible; StockRadar/0.1; personal use)"
 SEC_UA = os.environ.get("SEC_USER_AGENT", "StockRadar personal use your-email@example.com")  # SEC는 연락처 포함 UA를 요구
-DELAY = 1.5
-PAGES = 3
+DELAY = 0.7
+MAX_PAGES = 80          # 갤러리 하나당 최대 페이지 (오늘 글이 끝나면 먼저 멈춤)
+MIN_CAND = 4            # 후보 단어로 올리는 최소 언급 글 수
+MAX_CAND = 40           # 화면에 보낼 후보 단어 최대 개수
 BASE_DAYS = 7
 NPS_CIK = os.environ.get("NPS_CIK", "1608046")  # 실행 시 SEC 응답의 제출인 이름으로 한 번 더 검증함
 
@@ -56,6 +58,7 @@ STOCKS = {
     "팔란티어":   (["팔란티어", "PLTR"], "PLTR", "NYSE:PLTR", "PLTR", "$"),
 }
 
+BUILTIN = set(STOCKS)
 _robots = {}
 def allowed(url):
     host = "{0.scheme}://{0.netloc}".format(urlparse(url))
@@ -71,16 +74,39 @@ def allowed(url):
     return bool(rp) and rp.can_fetch(UA, url)
 
 def fetch_titles(url):
-    titles = []
-    for page in range(1, PAGES + 1):
+    """오늘(한국시간) 올라온 글 제목을 페이지를 넘기며 전부 모은다.
+    목록은 최신순이라, 한 페이지에 오늘 글이 하나도 없으면 거기서 멈춘다."""
+    today = now_kst().date().isoformat()
+    titles, seen = [], set()
+    for page in range(1, MAX_PAGES + 1):
         r = requests.get(f"{url}&page={page}", headers={"User-Agent": UA}, timeout=15)
         if r.status_code != 200:
             break
         soup = BeautifulSoup(r.text, "html.parser")
-        for a in soup.select("td.gall_tit a:not(.reply_numbox)"):
-            t = a.get_text(strip=True)
+        rows = soup.select("tr.ub-content")
+        today_rows = 0
+        for tr in rows:
+            num = tr.select_one("td.gall_num")
+            if not num or not num.get_text(strip=True).isdigit():
+                continue                      # 공지·설문 등
+            d = tr.select_one("td.gall_date")
+            if not d:
+                continue
+            stamp = (d.get("title") or "")[:10]
+            is_today = (stamp == today) if stamp else (":" in d.get_text())
+            if not is_today:
+                continue
+            today_rows += 1
+            key = num.get_text(strip=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            a = tr.select_one("td.gall_tit a:not(.reply_numbox)")
+            t = a.get_text(strip=True) if a else ""
             if t:
                 titles.append(t)
+        if not rows or today_rows == 0:
+            break
         time.sleep(DELAY)
     return titles
 
@@ -90,6 +116,37 @@ def count_mentions(titles):
         pat = re.compile("|".join(re.escape(a) for a in aliases), re.I)
         out[name] = sum(1 for t in titles if pat.search(t))
     return out
+
+# ---------- 줄임말·신조어 후보 (등록 안 된 반복 단어) ----------
+STOP = set("""오늘 내일 어제 지금 진짜 그냥 이거 저거 그거 이게 저게 근데 그리고 하지만 때문 아니 아직 계속 다시 이제 보다 정말 너무 완전
+하나 사람 생각 이유 처음 마지막 오전 오후 시간 하루 이번 다음 다들 우리 나는 내가 너가 니가 누가 어디 언제 무엇 뭐냐 뭔가 이런 저런 그런
+어떻게 갤러리 갤럼 형님 형들 여러분 질문 추천 공지 후기 정리 주식 종목 매수 매도 상승 하락 급등 급락 가격 오른 내린 있음 없음 같음 같은
+하는 한다 했다 된다 이다 있다 없다 아님 맞음 하면 해서 해도 하고 하네 하냐 인가 인데 이면 이랑 에서 으로 까지 부터 보면 보니 많이 그래서
+이번주 다음주 지난 요즘 방금 다시 정리 좋은 나쁜 좋다 나쁘다 같다 어떤 모든 모두 제발 결국 사실 일단 혹시 역시 오히려 대충 갑자기 드디어""".split())
+_TOK = re.compile(r"[가-힣A-Za-z0-9]{2,}")
+_PART = "은는이가을를도만"
+
+def _norm(tok):
+    if tok.isascii():
+        return tok.upper()
+    if len(tok) >= 4 and tok[-1] in _PART:
+        tok = tok[:-1]
+    return tok
+
+def candidates(titles, known_aliases):
+    """제목마다 단어를 뽑아 '그 단어가 들어간 글 수'를 센다. 이미 등록된 종목 별칭은 뺀다."""
+    kn = [a.lower() for a in known_aliases if len(a) >= 2]
+    cnt = Counter()
+    for t in titles:
+        words = {_norm(w) for w in _TOK.findall(t)}
+        for w in words:
+            if len(w) < 2 or w in STOP or w.isdigit():
+                continue
+            lw = w.lower()
+            if any(a in lw for a in kn):
+                continue
+            cnt[w] += 1
+    return cnt
 
 def load_json(path, default):
     if os.path.exists(path):
@@ -101,18 +158,13 @@ def load_json(path, default):
 
 # ---------- 평소(기준) 계산 ----------
 def update_history(today_counts):
-    """history.json: {날짜: {"n": 실행 횟수, "sum": {종목: {출처: 누적 건수}}}}.
-    하루에 여러 번 돌려도 "한 번 돌 때의 평균 언급 수"를 비교할 수 있게 누적한다."""
+    """history.json: {날짜: {"tot": {이름: {출처: 그날 글 수}}}}. 하루 안에서는 마지막 값으로 덮어쓴다."""
     hist = load_json("history.json", {})
     day = now_kst().date().isoformat()
     cur = hist.get(day)
-    if not (isinstance(cur, dict) and "n" in cur):
-        cur = {"n": 0, "sum": {}}
-    cur["n"] += 1
-    for name, per in today_counts.items():
-        d = cur["sum"].setdefault(name, {})
-        for src, c in per.items():
-            d[src] = d.get(src, 0) + c
+    if not (isinstance(cur, dict) and "tot" in cur):
+        cur = {"tot": {}}
+    cur["tot"] = {n: p for n, p in today_counts.items() if p and sum(p.values()) > 0 or n in STOCKS}
     hist[day] = cur
     for d in sorted(hist)[:-30]:
         del hist[d]
@@ -120,24 +172,45 @@ def update_history(today_counts):
     return hist
 
 def baseline(hist, name):
-    """오늘을 뺀 최근 BASE_DAYS일, 하루 평균(한 번 돌 때)의 출처별 평균. 기록이 없으면 None."""
-    today = now_kst().date().isoformat()
-    days = [d for d in sorted(hist) if d != today][-BASE_DAYS:]
-    acc, used = defaultdict(float), 0
-    for d in days:
-        e = hist[d]
-        if "n" in e:
-            per, n = e["sum"].get(name), e["n"]
-        else:                      # 예전 형식(하루 1회 값)
-            per, n = e.get(name), 1
-        if per is None or not n:
-            continue
-        used += 1
-        for src, v in per.items():
-            acc[src] += v / n
-    if not used:
+    """오늘을 뺀 최근 BASE_DAYS일 하루 총량의 출처별 평균 × 오늘 지난 시간 비율. 기록 없으면 None.
+    (오늘은 아직 진행 중이라, 평소 총량도 지금 시각까지의 몫으로 맞춰 비교한다.)"""
+    now = now_kst()
+    today = now.date().isoformat()
+    days = [d for d in sorted(hist) if d != today and isinstance(hist[d], dict) and "tot" in hist[d]][-BASE_DAYS:]
+    if not days:
         return None
-    return {src: round(v / used, 1) for src, v in acc.items()}
+    frac = max(0.15, min(1.0, (now.hour + now.minute / 60) / 24))
+    acc = defaultdict(float)
+    for d in days:
+        for src, v in (hist[d]["tot"].get(name) or {}).items():   # 그날 기록에 없으면 0건이었다는 뜻
+            acc[src] += v
+    return {src: round(v / len(days) * frac, 1) for src, v in acc.items()}
+
+# ---------- 내가 연결한 줄임말 (화면에서 저장 → 클라우드플레어 KV → aliases.json) ----------
+def load_alias_map():
+    return load_json("aliases.json", {})
+
+def apply_aliases(amap):
+    """줄임말 → 풀네임 연결을 종목 사전에 합친다. 사전에 없는 종목은 코드로 새로 만든다."""
+    for abbr, v in amap.items():
+        name = (v.get("name") or "").strip()
+        code = (v.get("code") or "").strip().upper()
+        if not name:
+            continue
+        if name in STOCKS:
+            al = STOCKS[name][0]
+            if abbr not in al:
+                al.append(abbr)
+            continue
+        if re.fullmatch(r"\d{6}", code):
+            tv, ys, ccy = f"KRX:{code}", code + ".KS", "원"      # 코스닥이면 시세 단계에서 .KQ로 바꿔 본다
+        elif code:
+            tv, ys, ccy = code, code, "$"
+        else:
+            tv, ys, ccy = "", "", ""
+        if name in STOCKS:
+            continue
+        STOCKS[name] = ([name, abbr] if name != abbr else [name], code or "-", tv, ys, ccy)
 
 # ---------- 시세 ----------
 def fetch_prices():
@@ -148,12 +221,18 @@ def fetch_prices():
         return {}, None
     out = {}
     for name, (_a, _c, _tv, ysym, ccy) in STOCKS.items():
-        try:
-            fi = yf.Ticker(ysym).fast_info
-            last, prev = float(fi["last_price"]), float(fi["previous_close"])
-            out[name] = {"price": round(last, 2), "chg": round((last / prev - 1) * 100, 2), "ccy": ccy}
-        except Exception as e:
-            print("시세 실패", name, e)
+        if not ysym:
+            continue
+        for sym in ([ysym, ysym[:-3] + ".KQ"] if ysym.endswith(".KS") and name not in BUILTIN else [ysym]):
+            try:
+                fi = yf.Ticker(sym).fast_info
+                last, prev = float(fi["last_price"]), float(fi["previous_close"])
+                out[name] = {"price": round(last, 2), "chg": round((last / prev - 1) * 100, 2), "ccy": ccy}
+                break
+            except Exception as e:
+                last_err = e
+        else:
+            print("시세 실패", name, last_err)
     return out, now_kst().strftime("%H:%M:%S")
 
 # ---------- 국민연금 5% 룰 (DART) ----------
@@ -369,22 +448,36 @@ def fetch_13f():
     rows.sort(key=lambda r: -(r["curr"] - r["prev"]))
     return {"period": rec["reportDate"][hits[0]], "filedAt": rec["filingDate"][hits[0]], "rows": rows}
 
+def _scan(sid, url):
+    if not allowed(url):
+        return sid, None, f"{sid} (robots.txt로 자동 수집 불허 또는 확인 실패)"
+    try:
+        return sid, fetch_titles(url), None
+    except Exception as e:
+        return sid, None, f"{sid} ({e})"
+
 def collect_trend(out, old):
-    """커뮤니티 글에서 종목 언급 수를 세어 순위 재료를 만든다."""
+    """오늘 올라온 글 제목을 전부 모아 종목 언급 수를 세고, 등록 안 된 반복 단어도 후보로 센다."""
+    from concurrent.futures import ThreadPoolExecutor
+    skipped, per_src = [], {}
+    with ThreadPoolExecutor(max_workers=len(SOURCES)) as ex:
+        for sid, titles, err in ex.map(lambda kv: _scan(*kv), SOURCES.items()):
+            if err:
+                skipped.append(err)
+            else:
+                per_src[sid] = titles
+                print(f"{sid}: 오늘 글 {len(titles)}개")
     counts = {n: {} for n in STOCKS}
-    skipped = []
-    for sid, url in SOURCES.items():
-        if not allowed(url):
-            skipped.append(f"{sid} (robots.txt로 자동 수집 불허 또는 확인 실패)")
-            continue
-        try:
-            c = count_mentions(fetch_titles(url))
-        except Exception as e:
-            skipped.append(f"{sid} ({e})")
-            continue
-        for name, v in c.items():
+    wc = {}
+    known = [a for v in STOCKS.values() for a in v[0]] + list(STOCKS)
+    for sid, titles in per_src.items():
+        for name, v in count_mentions(titles).items():
             counts[name][sid] = v
-    hist = update_history(counts)
+        for w, c in candidates(titles, known).items():
+            wc.setdefault(w, {})[sid] = c
+    cand = {w: m for w, m in wc.items() if sum(m.values()) >= MIN_CAND}
+    cand = dict(sorted(cand.items(), key=lambda kv: -sum(kv[1].values()))[:300])
+    hist = update_history({**counts, **cand})
     prev_rank = {s["name"]: i + 1 for i, s in enumerate(old.get("stocks", []))}
     stocks = []
     for name, (aliases, code, tv, _y, ccy) in STOCKS.items():
@@ -396,9 +489,19 @@ def collect_trend(out, old):
             if b is not None:
                 s["b"] = b
             stocks.append(s)
+    shown = sorted(cand.items(), key=lambda kv: -sum(kv[1].values()))[:MAX_CAND]
+    for w, m in shown:
+        s = {"name": w, "code": "후보", "tv": "", "aliases": [w], "cand": True,
+             "prev": prev_rank.get(w), "m": m}
+        b = baseline(hist, w)
+        if b is not None:
+            s["b"] = b
+        stocks.append(s)
     stocks.sort(key=lambda s: -sum(s["m"].values()))
     out.update({"generatedAt": now_kst().strftime("%Y-%m-%d %H:%M"), "generatedISO": now_kst().isoformat(),
                 "skipped": skipped, "stocks": stocks,
+                "titleCount": {k: len(v) for k, v in per_src.items()},
+                "aliasMap": load_alias_map(),
                 "dict": [{"name": n, "code": v[1], "tv": v[2], "aliases": v[0]} for n, v in STOCKS.items()]})
 
 def collect_filings(out):
@@ -451,10 +554,14 @@ def main():
     if use_kv:
         raw = kv_get("trend")
         old = json.loads(raw) if raw else {}
+        am = kv_get("aliases")
+        if am:
+            open("aliases.json", "w", encoding="utf-8").write(am)
     else:
         old = load_json("trend.json", {})
     if not old and mode != "filings":
         mode = "full"
+    apply_aliases(load_alias_map())
     out = dict(old) if mode != "full" else {}
 
     if mode == "filings":
