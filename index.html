@@ -790,7 +790,13 @@ function sendStop(body,done){
     stopList=x.j.stop||[]; save('sr-stop',stopList); renderStops(); renderAll(); done('저장했습니다.',true);
   }).catch(function(){ done('저장 요청을 보내지 못했습니다.',false); });
 }
-function addStop(w){ w=(w||'').trim(); if(!w) return; sendStop({stop:w},function(t){ document.getElementById('st-msg').textContent='"'+w+'" '+t; }); }
+function toast(msg,bad){
+  var el=document.getElementById('toast');
+  if(!el){ el=document.createElement('div'); el.id='toast'; el.setAttribute('role','status'); el.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:92vw;padding:12px 18px;border-radius:14px;font-weight:700;font-size:14px;z-index:99;box-shadow:0 6px 24px rgba(0,0,0,.25)'; document.body.appendChild(el); }
+  el.style.background=bad?'#b3261e':'#121826'; el.style.color='#fff'; el.textContent=msg; el.style.display='block';
+  clearTimeout(el._t); el._t=setTimeout(function(){ el.style.display='none'; },bad?9000:2500);
+}
+function addStop(w){ w=(w||'').trim(); if(!w) return; sendStop({stop:w},function(t,ok){ var m=document.getElementById('st-msg'); if(m) m.textContent='"'+w+'" '+t; toast(ok?'"'+w+'" 제거했습니다':'"'+w+'" 제거 실패 — '+t,!ok); }); }
 var aiBusy=false;
 function aiPending(){
   var r=data.aiRequestedAt||0, at=data.aiSummary&&data.aiSummary.at?new Date(data.aiSummary.at).getTime():0;
@@ -893,7 +899,7 @@ function renderStops(){
     return '<span class="badge">'+esc(w)+' <button class="btn" style="padding:0 6px" data-un="'+esc(w)+'" aria-label="'+esc(w)+' 복원">복원</button></span>';
   }).join(' ') : '<span class="note">아직 없습니다.</span>';
   document.querySelectorAll('[data-un]').forEach(function(b){ b.addEventListener('click',function(){
-    sendStop({unstop:b.dataset.un},function(t){ document.getElementById('st-msg').textContent='"'+b.dataset.un+'" 복원: '+t; });
+    sendStop({unstop:b.dataset.un},function(t,ok){ document.getElementById('st-msg').textContent='"'+b.dataset.un+'" 복원: '+t; toast(ok?'"'+b.dataset.un+'" 복원했습니다':'복원 실패 — '+t,!ok); });
   }); });
 }
 function renderLog(){
