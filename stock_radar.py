@@ -33,6 +33,9 @@ MAX_PAGES = 80          # 갤러리 하나당 최대 페이지 (오늘 글이 �
 AI_MODEL = os.environ.get("AI_MODEL", "claude-haiku-4-5-20251001")
 AI_HOUR = 9             # AI 요약은 매일 한국시간 이 시각 이후 첫 집계 때 한 번 만든다
 AI_RETRY_MIN = 30       # 실패하면 이 간격(분) 안에는 다시 시도하지 않는다
+AI_PRICE_IN = float(os.environ.get("AI_PRICE_IN", "1.0"))    # 입력 100만 토큰당 달러 (Haiku 4.5 기준, 요금이 바뀌면 조정)
+AI_PRICE_OUT = float(os.environ.get("AI_PRICE_OUT", "5.0"))  # 출력 100만 토큰당 달러
+AI_KRW = float(os.environ.get("AI_KRW", "1400"))             # 원화 환산용 환율(대략)
 AI_TOP_STOCKS = 10      # 요약 대상 종목 수(언급 많은 순)
 AI_TITLES_PER_STOCK = 40  # 종목마다 AI에게 읽히는 글 제목 수
 AI_REST_TITLES = 100    # 종목에 안 묶인 글 표본 수
@@ -556,11 +559,31 @@ def ai_summary(per_src, stocks, old):
         out = [l for l in out if l][:10]
         if not out:
             return fail("empty")
-        print("AI 요약 완료:", out)
-        return {"at": now_kst().isoformat(), "lines": out, "titles": total, "sample": sample_n, "model": AI_MODEL}
+        u = r.json().get("usage") or {}
+        tin, tout = int(u.get("input_tokens", 0)), int(u.get("output_tokens", 0))
+        usd = tin / 1e6 * AI_PRICE_IN + tout / 1e6 * AI_PRICE_OUT
+        print("AI 요약 완료:", out, f"(입력 {tin} + 출력 {tout} 토큰, 약 ${usd:.4f})")
+        return {"at": now_kst().isoformat(), "lines": out, "titles": total, "sample": sample_n, "model": AI_MODEL,
+                "usage": {"in": tin, "out": tout, "usd": round(usd, 5)}}
     except Exception as e:
         print("AI 요약 실패:", type(e).__name__)
         return fail("exception")
+
+def track_usage(new, old):
+    """AI 요약을 만들 때마다 쓴 토큰과 비용을 쌓는다 (이 기능을 켠 뒤부터의 추정치)."""
+    tot = dict(old.get("aiUsage") or {})
+    tot.setdefault("calls", 0); tot.setdefault("in", 0); tot.setdefault("out", 0); tot.setdefault("usd", 0.0)
+    tot.setdefault("days", {}); tot.setdefault("since", now_kst().strftime("%Y-%m-%d"))
+    prev_at = (old.get("aiSummary") or {}).get("at")
+    u = (new or {}).get("usage")
+    if u and new.get("at") != prev_at:
+        tot["calls"] += 1; tot["in"] += u["in"]; tot["out"] += u["out"]; tot["usd"] = round(tot["usd"] + u["usd"], 5)
+        d = tot["days"].setdefault(now_kst().strftime("%Y-%m-%d"), {"calls": 0, "tokens": 0, "usd": 0.0})
+        d["calls"] += 1; d["tokens"] += u["in"] + u["out"]; d["usd"] = round(d["usd"] + u["usd"], 5)
+        for k in sorted(tot["days"])[:-31]:
+            del tot["days"][k]
+    tot["krw"] = AI_KRW
+    return tot
 
 def _scan(sid, url):
     if not allowed(url):
@@ -621,7 +644,8 @@ def collect_trend(out, old):
                 "skipped": skipped, "stocks": stocks,
                 "titleCount": {k: len(v) for k, v in per_src.items()},
                 "stopWords": stop_list,
-                "aiSummary": ai_summary(per_src, stocks, old),
+                "aiSummary": (ai := ai_summary(per_src, stocks, old)),
+                "aiUsage": track_usage(ai, old),
                 "runLog": ([{"at": now_kst().strftime("%Y-%m-%d %H:%M:%S"), "sources": log_src}]
                            + (old.get("runLog") or []))[:30],
                 "aliasMap": load_alias_map(),

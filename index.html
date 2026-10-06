@@ -124,6 +124,7 @@ body{margin:0}
     <div class="card" id="aicard" style="display:flex;flex-direction:column;gap:6px">
       <div class="actions" style="justify-content:space-between;flex-wrap:wrap"><h2 style="margin:0">지금 가장 핫한 주제</h2><span><span class="note" id="ai-stat"></span> <button class="btn primary" id="ai-btn">AI 지금 요약하기</button></span></div>
       <span class="note" id="ai-meta"></span>
+      <span class="note" id="ai-cost"></span>
       <div id="ai-lines" class="note">요약을 불러오는 중…</div>
     </div>
     <div class="card" style="display:flex;flex-direction:column;gap:10px">
@@ -636,7 +637,19 @@ function requestAi(){
     },5000);
   }).catch(function(){ end('요청을 보내지 못했습니다.'); });
 }
+function fmtCost(usd,krw){ var w=Math.round(usd*(krw||1400)); return '$'+(usd<0.01?usd.toFixed(4):usd.toFixed(2))+' (약 '+w.toLocaleString('ko-KR')+'원)'; }
+function renderAiCost(){
+  var el=document.getElementById('ai-cost'), u=data.aiUsage, a=data.aiSummary;
+  if(data.isSample||!u||!u.calls){ el.textContent=''; return; }
+  var krw=u.krw||1400, parts=[];
+  var l=a&&a.usage; if(l) parts.push('이번 요약: 입력 '+l.in.toLocaleString('ko-KR')+' + 출력 '+l.out.toLocaleString('ko-KR')+' = '+(l.in+l.out).toLocaleString('ko-KR')+' 토큰, '+fmtCost(l.usd,krw));
+  var today=new Date(Date.now()+9*3600000).toISOString().slice(0,10), d=(u.days||{})[today];
+  if(d) parts.push('오늘 '+d.calls+'회 · '+d.tokens.toLocaleString('ko-KR')+' 토큰 · '+fmtCost(d.usd,krw));
+  parts.push('누적('+u.since+'부터) '+u.calls+'회 · '+(u.in+u.out).toLocaleString('ko-KR')+' 토큰(입력 '+u.in.toLocaleString('ko-KR')+' / 출력 '+u.out.toLocaleString('ko-KR')+') · '+fmtCost(u.usd,krw));
+  el.textContent='AI 사용량(추정): '+parts.join(' │ ')+'. 실제 청구액은 console.anthropic.com의 Usage에서 확인하세요.';
+}
 function renderAi(){
+  renderAiCost();
   var pend=aiPending(), btn=document.getElementById('ai-btn');
   if(btn) btn.disabled = aiBusy || pend;
   if(pend && !aiBusy) document.getElementById('ai-stat').textContent='요약 중… 새로고침해도 계속됩니다.';
@@ -761,7 +774,7 @@ document.getElementById('fm-clear').addEventListener('click',function(){fm={};fm
 function pull(){
   try{ fetch('trend.json?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(j&&j.stocks){
-      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,runLog:j.runLog||[],aiSummary:j.aiSummary||null,aiRequestedAt:j.aiRequestedAt||0,refreshAt:j.refreshAt||0,f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
+      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,runLog:j.runLog||[],aiSummary:j.aiSummary||null,aiUsage:j.aiUsage||null,aiRequestedAt:j.aiRequestedAt||0,refreshAt:j.refreshAt||0,f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
       if(j.listsLive){ listsLoaded=true; aliasMap=j.aliasMap||{}; stopList=j.stopWords||[]; save('sr-stop',stopList); }
       loadLists(); renderAmap(); renderStops(); renderLog(); renderAi();
       ensureDictStocks(); ensureNaver(); mergeLinked(); head(); renderNps(); renderAll();
