@@ -165,13 +165,144 @@ def fetch_nps(days=90):
                 seen.add(no)
                 d = it["rcept_dt"]
                 rows.append([it["corp_name"], it.get("stock_code", ""), None,
-                             f"{d[:4]}-{d[4:6]}-{d[6:]}", no])
+                             f"{d[:4]}-{d[4:6]}-{d[6:]}", no, it.get("corp_code", "")])
         if page >= int(r.get("total_page", 1) or 1):
             break
         page += 1
         time.sleep(0.3)
     rows.sort(key=lambda x: x[3], reverse=True)
     return rows[:60]
+
+# ---------- 국민연금 TOP 3 ----------
+def _num(x):
+    try:
+        return float(str(x).replace(",", "").strip())
+    except Exception:
+        return None
+
+def _dart(path, **params):
+    key = os.environ.get("DART_API_KEY", "").strip()
+    r = requests.get(f"https://opendart.fss.or.kr/api/{path}.json",
+                     params={"crtfc_key": key, **params}, timeout=20)
+    time.sleep(0.25)
+    return r.json()
+
+def nps_change(corp_code):
+    """DART 대량보유 상황보고에서 국민연금의 가장 최근 보고(보유 지분율과 증감)."""
+    d = _dart("majorstock", corp_code=corp_code)
+    if d.get("status") != "000":
+        return None
+    best = None
+    for it in d.get("list", []):
+        if "국민연금" in it.get("repror", ""):
+            if best is None or it.get("rcept_dt", "") > best.get("rcept_dt", ""):
+                best = it
+    if not best:
+        return None
+    return {"rate": _num(best.get("stkrt")), "rate_chg": _num(best.get("stkrt_irds")),
+            "qty": _num(best.get("stkqy")), "qty_chg": _num(best.get("stkqy_irds")),
+            "date": best.get("rcept_dt", ""), "reason": best.get("report_resn", "")}
+
+def financials(corp_code):
+    """최근 사업연도 매출·영업이익(연결 우선). 금액 단위는 원."""
+    y = now_kst().year - 1
+    for year in (y, y - 1):
+        d = _dart("fnlttSinglAcnt", corp_code=corp_code, bsns_year=str(year), reprt_code="11011")
+        if d.get("status") != "000":
+            continue
+        pick = {}
+        for it in d.get("list", []):
+            nm = it.get("account_nm", "")
+            k = "rev" if nm in ("매출액", "영업수익") else "op" if nm == "영업이익" else None
+            if not k:
+                continue
+            rank = 0 if it.get("fs_div") == "CFS" else 1
+            if k not in pick or rank < pick[k][0]:
+                pick[k] = (rank, _num(it.get("thstrm_amount")), _num(it.get("frmtrm_amount")))
+        if pick:
+            g = lambda k, i: pick[k][i] if k in pick else None
+            return {"year": year, "rev": g("rev", 1), "rev_prev": g("rev", 2),
+                    "op": g("op", 1), "op_prev": g("op", 2)}
+    return None
+
+def market_info(code):
+    try:
+        import yfinance as yf
+    except ImportError:
+        return None
+    for suf in (".KS", ".KQ"):
+        try:
+            t = yf.Ticker(code + suf)
+            fi = t.fast_info
+            price, mcap = float(fi["last_price"]), float(fi["market_cap"])
+            if not (price > 0 and mcap > 0):
+                continue
+            info = {}
+            try:
+                info = t.info or {}
+            except Exception:
+                pass
+            return {"price": price, "mcap": mcap,
+                    "sector": info.get("sector"), "industry": info.get("industry")}
+        except Exception:
+            continue
+    return None
+
+def news_for(name):
+    """구글 뉴스 RSS 상위 3건. robots.txt가 허용하지 않으면 비워 둔다."""
+    url = "https://news.google.com/rss/search"
+    if not allowed(url + "?q=x"):
+        return None
+    import xml.etree.ElementTree as ET
+    try:
+        r = requests.get(url, params={"q": f"{name} 주식", "hl": "ko", "gl": "KR", "ceid": "KR:ko"},
+                         headers={"User-Agent": UA}, timeout=15)
+        items = []
+        for it in ET.fromstring(r.content).iter("item"):
+            items.append({"title": it.findtext("title"), "link": it.findtext("link"),
+                          "date": it.findtext("pubDate")})
+            if len(items) >= 3:
+                break
+        return items
+    except Exception:
+        return None
+
+def build_top3(nps_rows):
+    """최근 DART 보고 중 국민연금 지분율이 가장 많이 늘어난 3곳. 점수 = 지분율 증가폭(%p)."""
+    seen, cands = set(), []
+    for r in nps_rows:
+        if len(r) < 6 or not r[1] or not r[5] or r[5] in seen:
+            continue
+        seen.add(r[5])
+        cands.append(r)
+    cands = cands[:60]
+    scored = []
+    for r in cands:
+        try:
+            ch = nps_change(r[5])
+        except Exception:
+            ch = None
+        if ch and ch["rate_chg"] and ch["rate_chg"] > 0:
+            scored.append((ch["rate_chg"], r, ch))
+    scored.sort(key=lambda x: -x[0])
+    out = []
+    for _score, r, ch in scored[:3]:
+        name, code, corp = r[0], r[1], r[5]
+        mk = market_info(code)
+        fin = None
+        try:
+            fin = financials(corp)
+        except Exception:
+            pass
+        amount = None
+        if mk and ch.get("qty_chg"):
+            amount = ch["qty_chg"] * mk["price"]
+        out.append({"name": name, "code": code, "tv": f"KRX:{code}", "nps": ch,
+                    "amount": amount, "mcap": mk["mcap"] if mk else None,
+                    "price": mk["price"] if mk else None,
+                    "biz": " / ".join(x for x in [mk and mk.get("sector"), mk and mk.get("industry")] if x) or None,
+                    "fin": fin, "news": news_for(name)})
+    return out
 
 # ---------- 미국 13F (SEC EDGAR) ----------
 def _sec(url):
@@ -260,6 +391,10 @@ def main():
         nps = fetch_nps()
         if nps:
             out["nps"] = nps
+            try:
+                out["top3"] = build_top3(nps)
+            except Exception as e:
+                print("TOP3 실패:", e)
         try:
             f13 = fetch_13f()
             if f13:

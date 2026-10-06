@@ -51,8 +51,8 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
 .rank{font-family:var(--font-num);font-size:20px;font-weight:500}
 .name{font-weight:700;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
 .code{font-family:var(--font-num);font-size:12px;color:var(--muted);font-weight:400}
-.meta{font-size:12px;color:var(--muted);font-family:var(--font-num)}
-.badge{font-size:11px;padding:1px 7px;border-radius:999px;font-weight:500}
+.meta{font-size:12px;color:var(--muted);font-family:var(--font-num);display:flex;flex-wrap:wrap;gap:2px 8px;align-items:center}
+.badge{font-size:11px;padding:1px 7px;border-radius:999px;font-weight:500;white-space:nowrap}
 .b-up{background:color-mix(in srgb,var(--up) 16%,transparent);color:var(--up)}
 .b-new{background:var(--accent-soft);color:var(--accent)}
 .b-multi{background:var(--accent-soft);color:var(--accent)}
@@ -149,8 +149,8 @@ body{margin:0}
   <section class="panel" id="p-nps" role="tabpanel" aria-labelledby="t-nps" hidden>
     <div class="card" style="display:flex;flex-direction:column;gap:12px">
       <h2>매력도 TOP 3 비교판</h2>
-      <p class="note">순위 기준: 최근 변동 금액 ÷ 시가총액. 시총에 비해 많이 담았을수록 공격적이라고 봅니다. 아래 세 종목은 기사에서 신규 편입·지분 확대로 언급된 후보입니다. 매출·영업이익·목표주가는 확인되지 않은 값을 채우지 않고 비워 두었습니다.</p>
-      <div class="tablebox">
+      <p class="note" id="top3head">순위 기준: 국민연금 지분율이 최근 보고에서 가장 많이 늘어난 순서(%p). 시가총액 대비 매수 규모와 같은 뜻입니다. 지금 표는 기사에서 언급된 후보를 보여 주는 샘플이고, DART 키로 수집이 돌면 실제 TOP 3로 바뀝니다.</p>
+      <div id="top3box"><div class="tablebox">
         <table>
           <thead><tr><th>항목</th><th>달바글로벌</th><th>파라다이스</th><th>대덕전자</th></tr></thead>
           <tbody>
@@ -165,8 +165,8 @@ body{margin:0}
               <td><a class="btn" target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=KRX%3A353200">트레이딩뷰</a></td></tr>
           </tbody>
         </table>
-      </div>
-      <p class="note">후보는 기사에 나온 이름일 뿐 위 기준으로 순위를 매긴 결과가 아닙니다. 수집 스크립트가 변동 금액과 시총을 채우면 이 표가 자동으로 3개로 정렬됩니다.</p>
+      </div></div>
+      <p class="note" id="top3note">후보는 기사에 나온 이름일 뿐 위 기준으로 순위를 매긴 결과가 아닙니다.</p>
     </div>
 
     <div class="card" style="display:flex;flex-direction:column;gap:12px">
@@ -365,7 +365,38 @@ function renderAlerts(list){
     return '<div class="alert"><b>'+x.rank+'위 '+esc(x.s.name)+'</b><span class="code">'+esc(x.s.code)+'</span><span class="meta">언급 '+x.total+'건</span>'+pxHtml(x.s)+'</div>';
   }).join('') : '트렌드 탭에서 별(☆)을 누르면 여기에 모입니다.';
 }
+function won(n){
+  if(n==null||isNaN(n)) return '-';
+  var a=Math.abs(n);
+  if(a>=1e12) return (n/1e12).toFixed(1)+'조';
+  if(a>=1e8) return Math.round(n/1e8).toLocaleString('ko-KR')+'억';
+  return Math.round(n).toLocaleString('ko-KR');
+}
+function pct(a,b){ if(a==null||b==null||b===0) return ''; var v=(a-b)/Math.abs(b)*100; return ' ('+(v>0?'+':'')+v.toFixed(0)+'%)'; }
+function renderTop3(){
+  var t=data.top3, box=document.getElementById('top3box');
+  if(!t||!t.length) return;
+  var cols=t.map(function(x){return '<th>'+esc(x.name)+' <span class="code">'+esc(x.code)+'</span></th>';}).join('');
+  function row(label,fn){return '<tr><td>'+label+'</td>'+t.map(function(x){return '<td style="white-space:normal;min-width:180px;vertical-align:top">'+fn(x)+'</td>';}).join('')+'</tr>';}
+  var rows=[
+    row('국민연금 움직임',function(x){var n=x.nps||{};
+      return '지분율 '+(n.rate==null?'-':n.rate)+'%'+(n.rate_chg==null?'':' ('+(n.rate_chg>0?'+':'')+n.rate_chg+'%p)')+'<br><span class="note">'+esc(n.date||'')+' · '+esc(n.reason||'')+'</span>';}),
+    row('변동 규모',function(x){return (x.amount==null?'-':won(x.amount)+'원')+'<br><span class="note">시총 '+won(x.mcap)+'원</span>';}),
+    row('업종',function(x){return x.biz?esc(x.biz):'-';}),
+    row('매출 / 영업이익',function(x){var f=x.fin; if(!f) return '<span class="pending">DART에서 못 찾음</span>';
+      return esc(f.year)+'년<br>매출 '+won(f.rev)+pct(f.rev,f.rev_prev)+'<br>영업이익 '+won(f.op)+pct(f.op,f.op_prev);}),
+    row('최근 뉴스',function(x){
+      if(!x.news||!x.news.length) return '<a class="btn" target="_blank" rel="noopener" href="https://search.naver.com/search.naver?where=news&query='+encodeURIComponent(x.name)+'">네이버 뉴스에서 보기</a>';
+      return x.news.map(function(n){var ok=/^https:\/\//.test(n.link||''); return ok?'<a href="'+esc(n.link)+'" target="_blank" rel="noopener">'+esc(n.title)+'</a>':esc(n.title);}).join('<br><br>');}),
+    row('목표주가',function(x){return '<a class="btn" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code='+encodeURIComponent(x.code)+'">증권사 컨센서스 보기</a>';}),
+    row('차트',function(x){return '<a class="btn primary" target="_blank" rel="noopener" href="'+tvUrl(x.tv)+'">차트 분석</a>';})
+  ].join('');
+  box.innerHTML='<div class="tablebox"><table><thead><tr><th>항목</th>'+cols+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  document.getElementById('top3head').textContent='순위 기준: 최근 DART 대량보유 보고에서 국민연금 지분율이 가장 많이 늘어난 순서(%p). 시가총액 대비 매수 규모와 같은 뜻입니다.';
+  document.getElementById('top3note').textContent='목표주가는 제공처 이용 조건 때문에 자동 수집하지 않고 링크로 연결했습니다. 사업 업종은 야후 파이낸스 분류(영문)입니다. 매출·영업이익은 DART 최근 사업연도 기준이며 지분 변동 방향과 사유는 원문 공시로 확인하세요.';
+}
 function renderNps(){
+  renderTop3();
   var live = !!data.npsLive;
   document.getElementById('npsnote').innerHTML = (live
     ? '출처: 금융감독원 전자공시(DART) 국민연금 대량보유 보고. 목록에는 보유 수량이 없어 "공시 원문"에서 확인하세요.'
@@ -464,7 +495,7 @@ document.getElementById('fm-clear').addEventListener('click',function(){fm={};fm
 function pull(){
   try{ fetch('trend.json?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(j&&j.stocks){
-      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
+      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
       ensureDictStocks(); head(); renderNps(); renderAll();
     }
   }).catch(function(){}); }catch(e){}
