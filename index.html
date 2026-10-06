@@ -1,3 +1,8 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>종목 레이더</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
 <style>
@@ -94,8 +99,11 @@ textarea{width:100%;min-height:96px;box-sizing:border-box;font:inherit;font-size
   .row .actions{grid-column:3;grid-row:1}
 }
 @media (prefers-reduced-motion:no-preference){.seg{transition:width .25s}}
+body{margin:0}
 </style>
 
+</head>
+<body>
 <div class="wrap">
   <div class="top">
     <h1>종목 레이더</h1>
@@ -443,3 +451,5 @@ function pull(){
   setInterval(pull, 60000); /* 시세는 스크립트가 trend.json을 갱신하는 주기에 맞춰 1분마다 반영 */
 })();
 </script>
+</body>
+</html>
