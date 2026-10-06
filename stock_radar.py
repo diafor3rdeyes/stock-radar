@@ -573,6 +573,19 @@ def match_posts(aliases, posts_by_src, limit=POSTS_PER_STOCK):
     hits.sort(key=lambda x: x[0], reverse=True)
     return [[sid, t, u, tm] for tm, sid, t, u in hits[:limit]]
 
+def match_times(aliases, posts_by_src):
+    """그 종목(단어)이 제목에 들어간 오늘 글의 작성 시각(하루 중 몇 분째)을 출처별로 모두 돌려준다. 실시간 언급 탭용."""
+    als = [a.lower() for a in aliases if len(a) >= 2]
+    out = {}
+    for sid, plist in posts_by_src.items():
+        for t, u, tm in plist:
+            if len(tm) == 5 and tm[2] == ":" and any(a in t.lower() for a in als):
+                try:
+                    out.setdefault(sid, []).append(int(tm[:2]) * 60 + int(tm[3:]))
+                except ValueError:
+                    pass
+    return out
+
 def track_usage(new, old):
     """AI 요약을 만들 때마다 쓴 토큰과 비용을 쌓는다 (이 기능을 켠 뒤부터의 추정치)."""
     tot = dict(old.get("aiUsage") or {})
@@ -633,6 +646,7 @@ def collect_trend(out, old):
             s = {"name": name, "code": code, "tv": tv, "aliases": aliases,
                  "prev": prev_rank.get(name), "m": m}
             s["posts"] = match_posts(aliases + [name], posts_by_src)
+            s["tm"] = match_times(aliases + [name], posts_by_src)
             b = baseline(hist, name, [a for a, v in amap.items() if (v.get("name") or "").strip() == name and a != name])
             if b is not None:
                 s["b"] = b
@@ -640,7 +654,7 @@ def collect_trend(out, old):
     shown = sorted(cand.items(), key=lambda kv: -sum(kv[1].values()))[:MAX_CAND]
     for w, m in shown:
         s = {"name": w, "code": "후보", "tv": "", "aliases": [w], "cand": True,
-             "prev": prev_rank.get(w), "m": m, "posts": match_posts([w], posts_by_src)}
+             "prev": prev_rank.get(w), "m": m, "posts": match_posts([w], posts_by_src), "tm": match_times([w], posts_by_src)}
         b = baseline(hist, w)
         if b is not None:
             s["b"] = b

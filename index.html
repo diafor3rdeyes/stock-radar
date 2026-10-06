@@ -145,6 +145,7 @@ body{margin:0}
   <p>디시인사이드 글을 평소 언급량과 비교해 급증한 종목부터 보여 드리고, 국민연금 공시와 AI 요약까지 한 번에 확인합니다.</p>
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" id="t-trend" aria-selected="true" aria-controls="p-trend">트렌드 알림</button>
+    <button class="tab" role="tab" id="t-rt" aria-selected="false" aria-controls="p-rt">실시간 언급</button>
     <button class="tab" role="tab" id="t-nps" aria-selected="false" aria-controls="p-nps">국민연금 포착</button>
     <button class="tab" role="tab" id="t-alert" aria-selected="false" aria-controls="p-alert">내 알림</button>
     <button class="tab" role="tab" id="t-log" aria-selected="false" aria-controls="p-log">수집 로그</button>
@@ -216,6 +217,15 @@ body{margin:0}
       <div id="stlist" class="meta"></div>
     </div>
     <p class="note">화제성 점수 = (지금 언급 수 − 평소 언급 수) ÷ √(평소 + 1) × (1 + 0.15 × 언급된 커뮤니티 수 − 0.15). 어제도 오늘도 50건이면 0점이고, 평소 1건이던 종목이 50건이 되면 약 35점이라 크게 앞섭니다. 평소는 최근 7일 평균입니다. FM코리아는 직전에 붙여넣은 값이 평소가 됩니다.</p>
+  </section>
+
+  <!-- 실시간 언급 -->
+  <section class="panel" id="p-rt" role="tabpanel" aria-labelledby="t-rt" hidden>
+    <div class="card" style="display:flex;flex-direction:column;gap:10px">
+      <div class="filters"><span class="note">기간</span><span class="seg-toggle" role="group" aria-label="기간" id="rt-seg"></span></div>
+      <p class="note" id="rt-note"></p>
+    </div>
+    <div class="card"><div class="rows" id="rt-rows"></div></div>
   </section>
 
   <!-- 국민연금 -->
@@ -365,7 +375,7 @@ var showCand = true, data = SAMPLE, active = {}, watch = {}, prefs = {jump:3, on
 SOURCES.forEach(function(s){active[s.id]=true;});
 function load(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch(e){return d;}}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
-watch = load('sr-watch',{}); prefs = load('sr-prefs',prefs); fm = load('sr-fm',{}); fmBase = load('sr-fmbase',{}); nv = load('sr-nv',{}); nvBase = load('sr-nvbase',{});
+rtH = load('sr-rt',1); if([1,3,5,12,24].indexOf(rtH)<0) rtH=1; watch = load('sr-watch',{}); prefs = load('sr-prefs',prefs); fm = load('sr-fm',{}); fmBase = load('sr-fmbase',{}); nv = load('sr-nv',{}); nvBase = load('sr-nvbase',{});
 (function(){ var f=load('sr-filter',null); if(!f) return;
   if(f.active) SOURCES.forEach(function(s){ if(f.active[s.id]===false) active[s.id]=false; });
   if(f.sortBy) sortBy=f.sortBy; if(typeof f.showCand==='boolean') showCand=f.showCand; })();
@@ -413,42 +423,86 @@ function renderFilters(){
 }
 var openPosts = {}, morePosts = {};
 function srcLabel(id){ var f=SOURCES.filter(function(x){return x.id===id;})[0]; return f?f.name.replace('디시 ',''):id; }
-function postsHtml(s){
-  var p=s.posts||[];
-  if(!openPosts[s.name]) return '';
+var RT_OPTS=[[1,'1시간'],[3,'3시간'],[5,'5시간'],[12,'12시간'],[24,'하루']], rtH;
+function rtLabel(){ return RT_OPTS.filter(function(o){return o[0]===rtH;})[0][1]; }
+function refMin(){
+  var g=String(data.generatedAt||'').match(/(\d\d):(\d\d)$/);
+  if(g) return (+g[1])*60+(+g[2]);
+  var k=new Date(Date.now()+9*3600000); return k.getUTCHours()*60+k.getUTCMinutes();
+}
+function rtWin(){ var ref=refMin(); return rtH>=24?[0,1440]:[Math.max(0,ref-rtH*60),ref]; }
+function postsFor(s,rt){
+  var p=s.posts||[]; if(!rt) return p;
+  var w=rtWin();
+  return p.filter(function(x){
+    if(!active[x[0]]) return false;
+    var tm=x[3]||''; if(tm.length!==5) return false;
+    var v=(+tm.slice(0,2))*60+(+tm.slice(3)); return v>=w[0]&&v<=w[1];
+  });
+}
+function computeRt(){
+  var w=rtWin();
+  var list=data.stocks.map(function(s){
+    var tm=s.tm||{}, m={}, total=0, n=0;
+    SOURCES.forEach(function(src){
+      if(!active[src.id]) return;
+      var a=tm[src.id]||[], c=0; for(var i=0;i<a.length;i++){ if(a[i]>=w[0]&&a[i]<=w[1]) c++; }
+      if(c){ m[src.id]=c; total+=c; n++; }
+    });
+    return {s:s,m:m,total:total,base:0,ready:false,n:n,score:total};
+  }).filter(function(x){return x.total>0 && (!x.s.cand || (showCand && stopList.indexOf(x.s.name)<0));});
+  list.sort(function(a,b){return (b.total-a.total)||(b.n-a.n)||String(a.s.name).localeCompare(b.s.name);});
+  list.forEach(function(x,i){x.rank=i+1;});
+  return list;
+}
+function renderRt(){
+  var seg=document.getElementById('rt-seg'); if(!seg) return;
+  seg.innerHTML=RT_OPTS.map(function(o){return '<button data-rt="'+o[0]+'" aria-pressed="'+(o[0]===rtH)+'">'+o[1]+'</button>';}).join('');
+  seg.querySelectorAll('[data-rt]').forEach(function(b){ b.addEventListener('click',function(){ rtH=parseInt(b.dataset.rt); save('sr-rt',rtH); renderAll(); }); });
+  var w=rtWin(), hm=function(v){ return ('0'+Math.floor(v/60)).slice(-2)+':'+('0'+(v%60)).slice(-2); };
+  document.getElementById('rt-note').textContent='디시인사이드 글의 작성 시각 기준, '+(rtH>=24?'오늘 하루':'최근 '+rtLabel()+' ('+hm(w[0])+'~'+hm(w[1])+')')+' 동안 가장 많이 언급된 순서입니다. 제거한 단어·연결한 줄임말·커뮤니티 체크(트렌드 알림 탭)가 그대로 적용됩니다. FM코리아·네이버 붙여넣기는 글 시각이 없어 여기서는 제외됩니다. 오늘 0시 이후 글만 셉니다.';
+  if(data.isSample){ document.getElementById('rt-rows').innerHTML='<p class="note">샘플 화면에서는 실시간 언급이 나오지 않습니다.</p>'; return; }
+  renderRows(computeRt(),'rt-rows',true);
+}
+function postsHtml(s,key,rt){
+  key=key||s.name;
+  var p=postsFor(s,rt);
+  if(!openPosts[key]) return '';
   if(!p.length){
     var any=(data.stocks||[]).some(function(x){return x.posts&&x.posts.length;});
     return '<div class="posts"><span class="note">'+(any?'오늘 디시 갤러리 제목에서 이 단어가 들어간 글을 찾지 못했습니다. (FM코리아·네이버 붙여넣기 글은 링크가 없습니다)':'수집 결과에 글 링크가 아직 없습니다. 최신 stock_radar.py를 올린 뒤 "지금 수집하기"를 눌러 주세요.')+'</span></div>';
   }
-  var shown=morePosts[s.name]?p:p.slice(0,10);
+  var shown=morePosts[key]?p:p.slice(0,10);
   var items=shown.map(function(x){
     var ok=/^https:\/\/gall\.dcinside\.com\//.test(x[2]||'');
     var t=esc(x[1]);
     return '<div class="post"><span class="src">'+esc(srcLabel(x[0]))+(x[3]?' · '+esc(x[3]):'')+'</span>'+(ok?'<a href="'+esc(x[2])+'" target="_blank" rel="noopener noreferrer">'+t+'</a>':'<span>'+t+'</span>')+'</div>';
   }).join('');
-  var more=p.length>10?'<button class="btn" data-more="'+esc(s.name)+'" style="align-self:flex-start;margin-top:4px">'+(morePosts[s.name]?'접기':'더보기 ('+(p.length-10)+'건 더)')+'</button>':'';
-  return '<div class="posts"><div class="note" style="margin-bottom:2px">오늘 이 단어가 들어간 글 ('+(morePosts[s.name]?'최근 '+p.length:'최근 '+shown.length+' / 전체 '+p.length)+'건) · 제목을 누르면 원문으로 이동합니다</div>'+items+more+'</div>';
+  var more=p.length>10?'<button class="btn" data-more="'+esc(key)+'" style="align-self:flex-start;margin-top:4px">'+(morePosts[key]?'접기':'더보기 ('+(p.length-10)+'건 더)')+'</button>':'';
+  return '<div class="posts"><div class="note" style="margin-bottom:2px">'+(rt?'최근 '+rtLabel()+' 동안 이 단어가 들어간 글 (':'오늘 이 단어가 들어간 글 (')+(morePosts[key]?'최근 '+p.length:'최근 '+shown.length+' / 전체 '+p.length)+'건) · 제목을 누르면 원문으로 이동합니다</div>'+items+more+'</div>';
 }
-function renderRows(list){
-  var el=document.getElementById('rows');
-  if(!list.length){el.innerHTML='<p class="note">선택한 커뮤니티에서 집계된 종목이 없습니다.</p>';return;}
+function renderRows(list,elId,rt){
+  var el=document.getElementById(elId||'rows');
+  if(!list.length){el.innerHTML='<p class="note">'+(rt?'이 기간에 언급된 종목이 아직 없습니다. 수집된 글이 적거나 수집 전일 수 있습니다.':'선택한 커뮤니티에서 집계된 종목이 없습니다.')+'</p>';return;}
   var view = list.slice(0,100);
-  if(sortBy==='chg') view = view.slice().sort(function(a,b){return (b.s.chg==null?-99:b.s.chg)-(a.s.chg==null?-99:a.s.chg);});
+  if(!rt && sortBy==='chg') view = view.slice().sort(function(a,b){return (b.s.chg==null?-99:b.s.chg)-(a.s.chg==null?-99:a.s.chg);});
   el.innerHTML = view.map(function(x){
     var s=x.s, d = s.prev==null ? null : s.prev - x.rank;
     var delta = d==null ? '<span class="badge b-new">신규</span>' :
       d>0 ? '<span class="delta up">▲'+d+'</span>' : d<0 ? '<span class="delta down">▼'+(-d)+'</span>' : '<span class="delta flat">-</span>';
     var hot = (d==null || d>=prefs.jump) ? '<span class="badge b-up">급상승</span>' : '';
+    if(rt){ delta=''; hot=''; }
+    var key=(rt?'rt:':'')+s.name, pl=postsFor(s,rt);
     var multi = x.n>=3 ? '<span class="badge b-multi">'+x.n+'곳 동시</span>' : '';
     var segs = SOURCES.filter(function(src){return active[src.id] && (x.m[src.id]||0)>0;}).map(function(src){
       var p = x.m[src.id]/x.total*100;
       return '<div class="seg" title="'+src.name+' '+p.toFixed(1)+'% ('+x.m[src.id]+'건)" style="width:'+p+'%;background:'+src.color+'">'+(p>=11?Math.round(p)+'%':'')+'</div>';
     }).join('');
     return '<div class="row"><div class="rank">'+x.rank+'</div>'+
-      '<div><div class="name"><button class="star" data-w="'+esc(wk(s))+'" aria-pressed="'+(!!watch[wk(s)])+'" aria-label="'+esc(s.name)+' 관심 종목">'+(watch[wk(s)]?'★':'☆')+'</button>'+'<button class="namebtn" data-open="'+esc(s.name)+'" aria-expanded="'+(!!openPosts[s.name])+'" title="'+((s.posts&&s.posts.length)?'클릭하면 이 단어가 언급된 글을 볼 수 있습니다':'')+'">'+esc(s.name)+((s.posts&&s.posts.length)?' <span class="car">'+(openPosts[s.name]?'▾':'▸')+'</span>':'')+'</button> <span class="code">'+esc(s.code)+'</span></div>'+
-      '<div class="meta">'+(x.ready?'평소 '+x.base+' → 지금 '+x.total+'건 (×'+(x.total/Math.max(x.base,1)).toFixed(1)+') · 점수 '+x.score.toFixed(0):'평소 기준 수집 중 · 언급 '+x.total+'건')+' &nbsp;'+delta+' '+hot+' '+multi+'</div></div>'+
+      '<div><div class="name"><button class="star" data-w="'+esc(wk(s))+'" aria-pressed="'+(!!watch[wk(s)])+'" aria-label="'+esc(s.name)+' 관심 종목">'+(watch[wk(s)]?'★':'☆')+'</button>'+'<button class="namebtn" data-open="'+esc(key)+'" aria-expanded="'+(!!openPosts[key])+'" title="'+((pl.length)?'클릭하면 이 단어가 언급된 글을 볼 수 있습니다':'')+'">'+esc(s.name)+((pl.length)?' <span class="car">'+(openPosts[key]?'▾':'▸')+'</span>':'')+'</button> <span class="code">'+esc(s.code)+'</span></div>'+
+      '<div class="meta">'+(rt?'최근 '+rtLabel()+' 동안 '+x.total+'건 언급':x.ready?'평소 '+x.base+' → 지금 '+x.total+'건 (×'+(x.total/Math.max(x.base,1)).toFixed(1)+') · 점수 '+x.score.toFixed(0):'평소 기준 수집 중 · 언급 '+x.total+'건')+' &nbsp;'+delta+' '+hot+' '+multi+'</div></div>'+
       '<div class="bar" role="img" aria-label="출처별 언급 비중">'+segs+'</div>'+
-      '<div class="actions">'+pxHtml(s)+(s.cand?'<button class="btn primary" data-al="'+esc(s.name)+'">풀네임 연결</button><button class="btn" data-st="'+esc(s.name)+'">제거</button>':(s.tv?'<a class="btn primary" href="'+tvUrl(s.tv)+'" target="_blank" rel="noopener">차트 분석</a>':(s.named?'<button class="btn primary" data-code="'+esc(s.name)+'">코드 등록</button>':'<a class="btn" href="https://search.naver.com/search.naver?query='+encodeURIComponent(s.name+' 주가')+'" target="_blank" rel="noopener">주가 검색</a>')))+'</div>'+postsHtml(s)+'</div>';
+      '<div class="actions">'+pxHtml(s)+(s.cand?'<button class="btn primary" data-al="'+esc(s.name)+'">풀네임 연결</button><button class="btn" data-st="'+esc(s.name)+'">제거</button>':(s.tv?'<a class="btn primary" href="'+tvUrl(s.tv)+'" target="_blank" rel="noopener">차트 분석</a>':(s.named?'<button class="btn primary" data-code="'+esc(s.name)+'">코드 등록</button>':'<a class="btn" href="https://search.naver.com/search.naver?query='+encodeURIComponent(s.name+' 주가')+'" target="_blank" rel="noopener">주가 검색</a>')))+'</div>'+postsHtml(s,key,rt)+'</div>';
   }).join('');
   el.querySelectorAll('[data-more]').forEach(function(b){ b.addEventListener('click',function(){ var n=b.dataset.more; morePosts[n]=!morePosts[n]; renderAll(); }); });
   el.querySelectorAll('[data-open]').forEach(function(b){ b.addEventListener('click',function(){ var n=b.dataset.open; openPosts[n]=!openPosts[n]; renderAll(); }); });
@@ -535,7 +589,7 @@ function renderNps(){
     return '<tr><td>'+esc(r.issuer)+'</td><td><span class="status-tag '+l[1]+'">'+l[0]+'</span></td><td class="num">'+money(r.prev)+'</td><td class="num">'+money(r.curr)+'</td><td class="num">'+(diff>0?'+':'')+money(diff)+'</td><td>'+link+'</td></tr>';
   }).join('');
 }
-function renderAll(){ renderFilters(); var l=compute(); renderRows(l); renderAlerts(l); }
+function renderAll(){ renderFilters(); var l=compute(); renderRows(l); renderAlerts(l); renderRt(); }
 
 var POLL = 30, left = 30;
 function ago(iso){
@@ -606,6 +660,7 @@ function mergeLinked(){
     if(t){
       t.m=Object.assign({},t.m); SOURCES.forEach(function(src){ var a=s.m[src.id]||0; if(a) t.m[src.id]=(t.m[src.id]||0)+a; });
       if(t.b && s.b){ t.b=Object.assign({},t.b); Object.keys(s.b).forEach(function(k){ t.b[k]=(t.b[k]||0)+s.b[k]; }); }
+      if(s.tm){ t.tm=Object.assign({},t.tm||{}); Object.keys(s.tm).forEach(function(k){ t.tm[k]=(t.tm[k]||[]).concat(s.tm[k]); }); }
       t.aliases=(t.aliases||[]).concat([s.name]);
       if(s.posts&&s.posts.length){ t.posts=(t.posts||[]).concat(s.posts).sort(function(a,b){return (b[3]||'').localeCompare(a[3]||'');}).slice(0,50); }
       return;
