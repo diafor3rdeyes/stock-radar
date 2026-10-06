@@ -411,7 +411,7 @@ function renderFilters(){
     el.addEventListener('change',function(){active[el.dataset.src]=el.checked;saveFilter();renderAll();});
   });
 }
-var openPosts = {};
+var openPosts = {}, morePosts = {};
 function srcLabel(id){ var f=SOURCES.filter(function(x){return x.id===id;})[0]; return f?f.name.replace('디시 ',''):id; }
 function postsHtml(s){
   var p=s.posts||[];
@@ -420,12 +420,14 @@ function postsHtml(s){
     var any=(data.stocks||[]).some(function(x){return x.posts&&x.posts.length;});
     return '<div class="posts"><span class="note">'+(any?'오늘 디시 갤러리 제목에서 이 단어가 들어간 글을 찾지 못했습니다. (FM코리아·네이버 붙여넣기 글은 링크가 없습니다)':'수집 결과에 글 링크가 아직 없습니다. 최신 stock_radar.py를 올린 뒤 "지금 수집하기"를 눌러 주세요.')+'</span></div>';
   }
-  var items=p.map(function(x){
+  var shown=morePosts[s.name]?p:p.slice(0,10);
+  var items=shown.map(function(x){
     var ok=/^https:\/\/gall\.dcinside\.com\//.test(x[2]||'');
     var t=esc(x[1]);
     return '<div class="post"><span class="src">'+esc(srcLabel(x[0]))+(x[3]?' · '+esc(x[3]):'')+'</span>'+(ok?'<a href="'+esc(x[2])+'" target="_blank" rel="noopener noreferrer">'+t+'</a>':'<span>'+t+'</span>')+'</div>';
   }).join('');
-  return '<div class="posts"><div class="note" style="margin-bottom:2px">오늘 이 단어가 들어간 글 (최근 '+p.length+'건) · 제목을 누르면 원문으로 이동합니다</div>'+items+'</div>';
+  var more=p.length>10?'<button class="btn" data-more="'+esc(s.name)+'" style="align-self:flex-start;margin-top:4px">'+(morePosts[s.name]?'접기':'더보기 ('+(p.length-10)+'건 더)')+'</button>':'';
+  return '<div class="posts"><div class="note" style="margin-bottom:2px">오늘 이 단어가 들어간 글 ('+(morePosts[s.name]?'최근 '+p.length:'최근 '+shown.length+' / 전체 '+p.length)+'건) · 제목을 누르면 원문으로 이동합니다</div>'+items+more+'</div>';
 }
 function renderRows(list){
   var el=document.getElementById('rows');
@@ -448,6 +450,7 @@ function renderRows(list){
       '<div class="bar" role="img" aria-label="출처별 언급 비중">'+segs+'</div>'+
       '<div class="actions">'+pxHtml(s)+(s.cand?'<button class="btn primary" data-al="'+esc(s.name)+'">풀네임 연결</button><button class="btn" data-st="'+esc(s.name)+'">제거</button>':(s.tv?'<a class="btn primary" href="'+tvUrl(s.tv)+'" target="_blank" rel="noopener">차트 분석</a>':(s.named?'<button class="btn primary" data-code="'+esc(s.name)+'">코드 등록</button>':'<a class="btn" href="https://search.naver.com/search.naver?query='+encodeURIComponent(s.name+' 주가')+'" target="_blank" rel="noopener">주가 검색</a>')))+'</div>'+postsHtml(s)+'</div>';
   }).join('');
+  el.querySelectorAll('[data-more]').forEach(function(b){ b.addEventListener('click',function(){ var n=b.dataset.more; morePosts[n]=!morePosts[n]; renderAll(); }); });
   el.querySelectorAll('[data-open]').forEach(function(b){ b.addEventListener('click',function(){ var n=b.dataset.open; openPosts[n]=!openPosts[n]; renderAll(); }); });
   el.querySelectorAll('[data-code]').forEach(function(b){ b.addEventListener('click',function(){ openAlias(b.dataset.code); document.getElementById('al-name').value=b.dataset.code; document.getElementById('alias-title').textContent='"'+b.dataset.code+'" 종목코드 등록'; }); });
   el.querySelectorAll('[data-st]').forEach(function(b){ b.addEventListener('click',function(){ addStop(b.dataset.st); }); });
@@ -604,7 +607,7 @@ function mergeLinked(){
       t.m=Object.assign({},t.m); SOURCES.forEach(function(src){ var a=s.m[src.id]||0; if(a) t.m[src.id]=(t.m[src.id]||0)+a; });
       if(t.b && s.b){ t.b=Object.assign({},t.b); Object.keys(s.b).forEach(function(k){ t.b[k]=(t.b[k]||0)+s.b[k]; }); }
       t.aliases=(t.aliases||[]).concat([s.name]);
-      if(s.posts&&s.posts.length){ t.posts=(t.posts||[]).concat(s.posts).sort(function(a,b){return (b[3]||'').localeCompare(a[3]||'');}).slice(0,20); }
+      if(s.posts&&s.posts.length){ t.posts=(t.posts||[]).concat(s.posts).sort(function(a,b){return (b[3]||'').localeCompare(a[3]||'');}).slice(0,50); }
       return;
     }
     var code=(v.code||'').toUpperCase();
