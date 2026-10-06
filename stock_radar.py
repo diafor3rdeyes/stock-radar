@@ -18,7 +18,7 @@ robots.txt가 허용하지 않는 사이트(FM코리아 등)는 건너뜁니다.
 import json, os, re, sys, time, datetime, urllib.robotparser
 from zoneinfo import ZoneInfo
 from collections import defaultdict, Counter
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import requests
 from bs4 import BeautifulSoup
 
@@ -31,11 +31,12 @@ SEC_UA = os.environ.get("SEC_USER_AGENT", "StockRadar personal use your-email@ex
 DELAY = 0.7
 MAX_PAGES = 80          # 갤러리 하나당 최대 페이지 (오늘 글이 끝나면 먼저 멈춤)
 AI_MODEL = os.environ.get("AI_MODEL", "claude-haiku-4-5-20251001")
-AI_HOUR = 9             # AI 요약은 매일 한국시간 이 시각 이후 첫 집계 때 한 번 만든다
+AI_HOUR = 9             # (사용 안 함) 예전 자동 갱신 시각
 AI_RETRY_MIN = 30       # 실패하면 이 간격(분) 안에는 다시 시도하지 않는다
 AI_PRICE_IN = float(os.environ.get("AI_PRICE_IN", "1.0"))    # 입력 100만 토큰당 달러 (Haiku 4.5 기준, 요금이 바뀌면 조정)
 AI_PRICE_OUT = float(os.environ.get("AI_PRICE_OUT", "5.0"))  # 출력 100만 토큰당 달러
 AI_KRW = float(os.environ.get("AI_KRW", "1400"))             # 원화 환산용 환율(대략)
+POSTS_PER_STOCK = 20    # 종목(단어)마다 화면에 보여 줄 '언급된 글' 링크 수 (최신순)
 AI_TOP_STOCKS = 10      # 요약 대상 종목 수(언급 많은 순)
 AI_TITLES_PER_STOCK = 40  # 종목마다 AI에게 읽히는 글 제목 수
 AI_REST_TITLES = 100    # 종목에 안 묶인 글 표본 수
@@ -86,7 +87,7 @@ def fetch_titles(url):
     """오늘(한국시간) 올라온 글 제목을 페이지를 넘기며 전부 모은다.
     목록은 최신순이라, 한 페이지에 오늘 글이 하나도 없으면 거기서 멈춘다."""
     today = now_kst().date().isoformat()
-    titles, seen = [], set()
+    titles, seen, posts = [], set(), []
     t0 = time.time()
     info = {"pages": 0, "perPage": [], "stop": ""}
     for page in range(1, MAX_PAGES + 1):
@@ -117,6 +118,9 @@ def fetch_titles(url):
             t = a.get_text(strip=True) if a else ""
             if t:
                 titles.append(t)
+                href = (a.get("href") or "") if a else ""
+                link = re.sub(r"&page=\d+", "", urljoin(url, href)) if href else ""
+                posts.append((t, link, (d.get("title") or "")[11:16]))
         info["pages"] = page
         info["perPage"].append(today_rows)
         if not rows:
@@ -130,6 +134,7 @@ def fetch_titles(url):
         time.sleep(DELAY)
     info["sec"] = round(time.time() - t0, 1)
     info["titles"] = len(titles)
+    info["posts"] = posts
     return titles, info
 
 def count_mentions(titles):
@@ -491,21 +496,8 @@ def ai_summary(per_src, stocks, old):
         return prev or {"error": "no_key"}
     now = now_kst()
     if not force:
-        # 매일 AI_HOUR시 이후 첫 집계에서 하루 한 번. 요약이 아직 없으면 처음 한 번은 만든다.
-        has = bool(prev and prev.get("lines") and prev.get("at"))
-        if has:
-            try:
-                done_day = datetime.datetime.fromisoformat(prev["at"]).astimezone(KST).date()
-            except Exception:
-                done_day = None
-            if done_day == now.date() or now.hour < AI_HOUR:
-                return prev
-        if prev and prev.get("tryAt"):
-            try:
-                if (now - datetime.datetime.fromisoformat(prev["tryAt"])).total_seconds() < AI_RETRY_MIN * 60:
-                    return prev
-            except Exception:
-                pass
+        # 자동 갱신 없음: 화면의 "AI 지금 요약하기" 버튼을 눌렀을 때만 만든다.
+        return prev or {}
     def fail(code):
         res = dict(prev or {})
         res["error"], res["tryAt"] = code, now.isoformat()
@@ -569,6 +561,18 @@ def ai_summary(per_src, stocks, old):
         print("AI 요약 실패:", type(e).__name__)
         return fail("exception")
 
+def match_posts(aliases, posts_by_src, limit=POSTS_PER_STOCK):
+    """그 종목(단어)이 제목에 들어간 오늘 글을 최신순으로 골라 [출처, 제목, 링크, 시각]으로 돌려준다."""
+    als = [a.lower() for a in aliases if len(a) >= 2]
+    hits = []
+    for sid, plist in posts_by_src.items():
+        for t, u, tm in plist:
+            tl = t.lower()
+            if u.startswith("https://gall.dcinside.com/") and any(a in tl for a in als):
+                hits.append((tm, sid, t, u))
+    hits.sort(key=lambda x: x[0], reverse=True)
+    return [[sid, t, u, tm] for tm, sid, t, u in hits[:limit]]
+
 def track_usage(new, old):
     """AI 요약을 만들 때마다 쓴 토큰과 비용을 쌓는다 (이 기능을 켠 뒤부터의 추정치)."""
     tot = dict(old.get("aiUsage") or {})
@@ -597,7 +601,7 @@ def _scan(sid, url):
 def collect_trend(out, old):
     """오늘 올라온 글 제목을 전부 모아 종목 언급 수를 세고, 등록 안 된 반복 단어도 후보로 센다."""
     from concurrent.futures import ThreadPoolExecutor
-    skipped, per_src, log_src = [], {}, []
+    skipped, per_src, log_src, posts_by_src = [], {}, [], {}
     stop_list = load_stop()
     with ThreadPoolExecutor(max_workers=len(SOURCES)) as ex:
         for sid, titles, err, info in ex.map(lambda kv: _scan(*kv), SOURCES.items()):
@@ -606,6 +610,7 @@ def collect_trend(out, old):
                 log_src.append({"id": sid, "error": err})
             else:
                 per_src[sid] = titles
+                posts_by_src[sid] = info.pop("posts", [])
                 log_src.append({"id": sid, **info})
                 print(f"{sid}: 오늘 글 {len(titles)}개, 1~{info['pages']}페이지, {info['stop']}")
     counts = {n: {} for n in STOCKS}
@@ -627,6 +632,7 @@ def collect_trend(out, old):
         if sum(m.values()) > 0:
             s = {"name": name, "code": code, "tv": tv, "aliases": aliases,
                  "prev": prev_rank.get(name), "m": m}
+            s["posts"] = match_posts(aliases + [name], posts_by_src)
             b = baseline(hist, name, [a for a, v in amap.items() if (v.get("name") or "").strip() == name and a != name])
             if b is not None:
                 s["b"] = b
@@ -634,7 +640,7 @@ def collect_trend(out, old):
     shown = sorted(cand.items(), key=lambda kv: -sum(kv[1].values()))[:MAX_CAND]
     for w, m in shown:
         s = {"name": w, "code": "후보", "tv": "", "aliases": [w], "cand": True,
-             "prev": prev_rank.get(w), "m": m}
+             "prev": prev_rank.get(w), "m": m, "posts": match_posts([w], posts_by_src)}
         b = baseline(hist, w)
         if b is not None:
             s["b"] = b
