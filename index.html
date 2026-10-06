@@ -164,7 +164,7 @@ body{margin:0}
 <body>
 
 <div class="topbar"><div class="inner"><span>커뮤니티 화제 → 평소 대비 급증 → 국민연금 → AI 요약, 어디서 뜨는지 데이터로 확인하세요</span><span class="stamp" id="stamp"></span></div></div>
-<header class="sitehead"><div class="inner"><div class="logo">종목<span>레이더</span></div><div class="headbtns"><span class="stamp note" id="refstat"></span><button class="btn primary" id="reload">지금 수집하기</button></div></div></header>
+<header class="sitehead"><div class="inner"><div class="logo">종목<span>레이더</span></div><div class="headbtns"><label class="chip" title="켜 두면 이 화면이 열려 있는 동안 10분마다 자동으로 수집합니다. 화면을 닫으면 멈춥니다."><input type="checkbox" id="autoc" checked>열려 있는 동안 10분마다 자동 수집</label><span class="stamp note" id="refstat"></span><button class="btn primary" id="reload">지금 수집하기</button></div></div></header>
 <div class="progstrip" id="prog" hidden><div class="inner"><div class="progtrack" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="prog-track"><i id="prog-fill"></i></div><span id="prog-pct" class="progpct">0%</span><span id="prog-txt" class="note"></span></div></div>
 <section class="hero"><div class="inner">
   <h1>지금 커뮤니티에서<br>어떤 종목이 뜨고 있을까요?</h1>
@@ -801,12 +801,22 @@ function head(){
   else { st.textContent='집계 '+data.generatedAt+(data.generatedISO?' ('+ago(data.generatedISO)+')':'')+' · 시세 '+(data.priceAt||'없음')+(data.priceISO?' ('+ago(data.priceISO)+')':''); }
   var warn = (!data.isSample && data.priceISO && marketHours() && (Date.now()-new Date(data.priceISO).getTime())>40*60000)
     ? ' · 시세가 40분 넘게 갱신되지 않았습니다. 깃허브 Actions 상태를 확인하세요' : '';
-  rf.textContent = '언급 집계와 시세는 평일 10분마다, 국민연금 공시는 매일 09·15·21시에 갱신 · 이 화면은 '+left+'초 뒤 다시 읽습니다'+warn;
+  rf.textContent = (autoOn?'이 화면이 열려 있는 동안 10분마다 자동 수집합니다(화면을 닫으면 멈춤) · ':'자동 수집이 꺼져 있습니다. "지금 수집하기"를 눌러야 갱신됩니다 · ')+'이 화면은 '+left+'초 뒤 다시 읽습니다'+warn;
   document.getElementById('banner').textContent = data.isSample
     ? '커뮤니티 순위, 비중, 등락률은 화면 확인용 샘플 숫자입니다. 실제 값이 아닙니다. stock_radar.py를 실행해 trend.json을 만들면 실제 값으로 바뀝니다.'
     : '시세는 무료 시세원 기준이라 종목에 따라 지연될 수 있습니다. '+(data.titleCount?'오늘 수집한 글: '+Object.keys(data.titleCount).map(function(k){return k+' '+data.titleCount[k].toLocaleString('ko-KR')+'개';}).join(' · ')+'. ':'')+((data.skipped||[]).length ? '수집 제외: '+data.skipped.join(', ') : '');
 }
 var refreshing = false, refreshStart = 0, progWas = false, progStartMs = 0, progHideT = null;
+var autoOn = load('sr-auto',true), lastAuto = 0;
+function autoCollect(){
+  /* 화면이 열려 있는 동안만 작동: 마지막 수집이 10분 넘게 지났으면 스스로 수집을 요청한다. 화면을 닫으면 아무 일도 일어나지 않는다. */
+  if(!autoOn || data.isSample || refreshing || collecting()) return;
+  var g=new Date(data.generatedISO||0).getTime(); if(!g) return;
+  if(Date.now()-g < 10*60000) return;
+  if(Date.now()-lastAuto < 3*60000) return;
+  lastAuto=Date.now();
+  fetch('/api/refresh',{method:'POST'}).then(function(){ setTimeout(pull,3000); }).catch(function(){});
+}
 function progTick(){
   var strip=document.getElementById('prog'); if(!strip) return;
   var col=collecting(), act=(col||refreshing) && !data.isSample;
@@ -1335,7 +1345,7 @@ function pull(){
       data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,prevGeneratedISO:j.prevGeneratedISO||null,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,runLog:j.runLog||[],aiSummary:j.aiSummary||null,aiUsage:j.aiUsage||null,aiBudget:j.aiBudget||null,aiWin:j.aiWin||{},aiRequestedAt:j.aiRequestedAt||0,refreshAt:j.refreshAt||0,f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
       if(j.listsLive){ listsLoaded=true; aliasMap=j.aliasMap||{}; stopList=j.stopWords||[]; save('sr-stop',stopList); }
       loadLists(); renderAmap(); renderStops(); renderLog(); renderAi();
-      ensureDictStocks(); ensureNaver(); mergeLinked(); head(); renderNps(); renderAll();
+      ensureDictStocks(); ensureNaver(); mergeLinked(); head(); renderNps(); renderAll(); autoCollect();
     }
   }).catch(function(){}); }catch(e){}
 }
@@ -1343,6 +1353,7 @@ function pull(){
   head(); renderNps(); renderAll(); renderStops(); renderLog(); renderAi();
   pull();
   document.getElementById('reload').addEventListener('click',requestRefresh);
+  var ac=document.getElementById('autoc'); ac.checked=autoOn; ac.addEventListener('change',function(){ autoOn=ac.checked; save('sr-auto',autoOn); if(autoOn){ lastAuto=0; autoCollect(); } });
   setInterval(function(){ left--; if(left<=0){ pull(); left=POLL; } else if(collecting() && left%5===0){ pull(); } head(); },1000);
 })();
 </script>
