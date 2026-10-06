@@ -1,0 +1,47 @@
+name: radar
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "full 또는 prices"
+        default: "full"
+  schedule:
+    - cron: "0 0,6,12 * * *"
+    - cron: "*/10 * * * 1-5"
+
+concurrency: radar
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+
+      - name: KV에서 이전 결과 내려받기
+        run: |
+          KV="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/storage/kv/namespaces/$CF_KV_NAMESPACE_ID/values"
+          curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/trend"   -o trend.json   || true
+          curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/history" -o history.json || true
+
+      - name: 실행
+        run: |
+          if [ "${{ github.event.schedule }}" = "*/10 * * * 1-5" ] || [ "${{ github.event.inputs.mode }}" = "prices" ]; then
+            python stock_radar.py --prices
+          else
+            python stock_radar.py
+          fi
+
+      - name: KV에 올리기
+        run: |
+          KV="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/storage/kv/namespaces/$CF_KV_NAMESPACE_ID/values"
+          curl -sf -X PUT -H "Authorization: Bearer $CF_API_TOKEN" --data-binary @trend.json "$KV/trend"
+          [ -f history.json ] && curl -sf -X PUT -H "Authorization: Bearer $CF_API_TOKEN" --data-binary @history.json "$KV/history" || true
