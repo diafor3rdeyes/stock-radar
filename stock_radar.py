@@ -16,10 +16,15 @@ robots.txt가 허용하지 않는 사이트(FM코리아 등)는 건너뜁니다.
 출력: trend.json, history.json (index.html과 같은 폴더)
 """
 import json, os, re, sys, time, datetime, urllib.robotparser
+from zoneinfo import ZoneInfo
 from collections import defaultdict
 from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
+
+KST = ZoneInfo("Asia/Seoul")
+def now_kst():
+    return datetime.datetime.now(KST)
 
 UA = "Mozilla/5.0 (compatible; StockRadar/0.1; personal use)"
 SEC_UA = os.environ.get("SEC_USER_AGENT", "StockRadar personal use your-email@example.com")  # SEC는 연락처 포함 UA를 요구
@@ -98,7 +103,7 @@ def load_json(path, default):
 def update_history(today_counts):
     """history.json: {날짜: {종목: {출처: 건수}}}. 같은 날 재실행하면 그날 값을 덮어씀."""
     hist = load_json("history.json", {})
-    hist[datetime.date.today().isoformat()] = today_counts
+    hist[now_kst().date().isoformat()] = today_counts
     for d in sorted(hist)[:-30]:
         del hist[d]
     json.dump(hist, open("history.json", "w", encoding="utf-8"), ensure_ascii=False)
@@ -106,7 +111,7 @@ def update_history(today_counts):
 
 def baseline(hist, name):
     """오늘을 뺀 최근 BASE_DAYS일의 출처별 평균. 기록이 없으면 None(화면에 '기준 수집 중' 표시)."""
-    today = datetime.date.today().isoformat()
+    today = now_kst().date().isoformat()
     days = [d for d in sorted(hist) if d != today][-BASE_DAYS:]
     days = [d for d in days if name in hist[d]]
     if not days:
@@ -132,29 +137,41 @@ def fetch_prices():
             out[name] = {"price": round(last, 2), "chg": round((last / prev - 1) * 100, 2), "ccy": ccy}
         except Exception as e:
             print("시세 실패", name, e)
-    return out, datetime.datetime.now().strftime("%H:%M:%S")
+    return out, now_kst().strftime("%H:%M:%S")
 
 # ---------- 국민연금 5% 룰 (DART) ----------
-def fetch_nps(days=60):
-    key = os.environ.get("DART_API_KEY")
+def fetch_nps(days=90):
+    """DART 공시목록에서 국민연금이 낸 '주식등의대량보유' 보고를 모은다.
+    반환: [[회사명, 종목코드, 수량(없으면 None), 공시일, 접수번호], ...] 최신순.
+    목록 API에는 보유 수량이 없어 수량은 비워 두고, 화면에서 공시 원문 링크로 확인한다."""
+    key = os.environ.get("DART_API_KEY", "").strip()
     if not key:
         return None
-    end = datetime.date.today()
+    end = now_kst().date()
     bgn = end - datetime.timedelta(days=days)
-    rows, page = [], 1
-    while page <= 10:
+    rows, seen, page = [], set(), 1
+    while page <= 20:
         r = requests.get("https://opendart.fss.or.kr/api/list.json", params={
             "crtfc_key": key, "bgn_de": bgn.strftime("%Y%m%d"), "end_de": end.strftime("%Y%m%d"),
             "pblntf_ty": "D", "page_no": page, "page_count": 100}, timeout=20).json()
+        if r.get("status") not in ("000", "013"):   # 013 = 조회된 데이터 없음
+            print("DART 응답:", r.get("status"), r.get("message"))
+            break
         for it in r.get("list", []):
             if "대량보유" in it.get("report_nm", "") and "국민연금" in it.get("flr_nm", ""):
+                no = it["rcept_no"]
+                if no in seen:
+                    continue
+                seen.add(no)
                 d = it["rcept_dt"]
-                rows.append([it["corp_name"], it.get("stock_code", ""), 0, f"{d[:4]}-{d[4:6]}-{d[6:]}"])
-        if page >= int(r.get("total_page", 1)):
+                rows.append([it["corp_name"], it.get("stock_code", ""), None,
+                             f"{d[:4]}-{d[4:6]}-{d[6:]}", no])
+        if page >= int(r.get("total_page", 1) or 1):
             break
         page += 1
         time.sleep(0.3)
-    return rows
+    rows.sort(key=lambda x: x[3], reverse=True)
+    return rows[:60]
 
 # ---------- 미국 13F (SEC EDGAR) ----------
 def _sec(url):
@@ -237,7 +254,7 @@ def main():
                     s["b"] = b
                 stocks.append(s)
         stocks.sort(key=lambda s: -sum(s["m"].values()))
-        out.update({"generatedAt": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        out.update({"generatedAt": now_kst().strftime("%Y-%m-%d %H:%M"),
                     "skipped": skipped, "stocks": stocks,
                     "dict": [{"name": n, "code": v[1], "tv": v[2], "aliases": v[0]} for n, v in STOCKS.items()]})
         nps = fetch_nps()

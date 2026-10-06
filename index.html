@@ -173,11 +173,11 @@ body{margin:0}
       <h2>최근 공시된 5% 룰 보고</h2>
       <div class="tablebox">
         <table>
-          <thead><tr><th>종목</th><th>코드</th><th class="num">보고 수량(주)</th><th>공시일</th><th>차트</th></tr></thead>
+          <thead><tr><th>종목</th><th>코드</th><th class="num">보고 수량(주)</th><th>공시일</th><th>차트</th><th>공시 원문</th></tr></thead>
           <tbody id="npsrows"></tbody>
         </table>
       </div>
-      <p class="note">출처: stockhub.kr 정리본(최근 공시 2026-08-13 기준). 이 표만으로는 매수인지 매도인지 알 수 없습니다. 방향은 스크립트가 DART 보고서의 직전 지분율과 비교해 판정합니다. 5% 이상 보유분만 신고 대상이고, 실제 거래보다 늦게 공시됩니다.</p>
+      <p class="note" id="npsnote"></p>
     </div>
     <div class="card" style="display:flex;flex-direction:column;gap:12px">
       <h2>미국 주식 보유 변동 (SEC 13F)</h2>
@@ -264,7 +264,7 @@ var SAMPLE = {
     {name:'테슬라', code:'TSLA', tv:'NASDAQ:TSLA', aliases:['테슬라','TSLA'], prev:6, chg:-1.4, b:{neostock:4,krstock:3,stockus:30,tenbagger:18,invest:2}, m:{neostock:4,krstock:3,stockus:27,tenbagger:16,invest:2}},
     {name:'셀트리온', code:'068270', tv:'KRX:068270', aliases:['셀트리온'], prev:10, chg:0.6, b:{neostock:11,krstock:14,stockus:0,tenbagger:1,invest:5}, m:{neostock:12,krstock:15,stockus:0,tenbagger:1,invest:5}}
   ],
-  f13: null,
+  f13: null, npsLive: false,
   nps: [
     ['셀트리온','068270',3391598,'2026-08-03'],['SK텔레콤','017670',2178072,'2026-08-03'],
     ['LG화학','051910',707035,'2026-08-03'],['현대로템','064350',1103422,'2026-08-03'],
@@ -366,9 +366,17 @@ function renderAlerts(list){
   }).join('') : '트렌드 탭에서 별(☆)을 누르면 여기에 모입니다.';
 }
 function renderNps(){
+  var live = !!data.npsLive;
+  document.getElementById('npsnote').innerHTML = (live
+    ? '출처: 금융감독원 전자공시(DART) 국민연금 대량보유 보고. 목록에는 보유 수량이 없어 "공시 원문"에서 확인하세요.'
+    : 'DART 인증키가 연결되기 전이라 2026-08-13 기준 stockhub.kr 정리본을 보여줍니다.')
+    + ' 5% 이상 보유분만 신고 대상이고 실제 거래보다 늦게 공시됩니다. 방향(매수·매도)은 원문에서 직전 지분율과 비교해 확인하세요. <a href="https://dart.fss.or.kr" target="_blank" rel="noopener">DART 바로가기</a>';
   document.getElementById('npsrows').innerHTML = data.nps.map(function(r){
     var sym='KRX:'+r[1];
-    return '<tr><td>'+esc(r[0])+'</td><td class="num">'+esc(r[1])+'</td><td class="num">'+Number(r[2]).toLocaleString('ko-KR')+'</td><td class="num">'+esc(r[3])+'</td><td><a class="btn" href="'+tvUrl(sym)+'" target="_blank" rel="noopener">차트</a></td></tr>';
+    var qty = (r[2]==null||r[2]===0) ? '-' : Number(r[2]).toLocaleString('ko-KR');
+    var chart = r[1] ? '<a class="btn" href="'+tvUrl(sym)+'" target="_blank" rel="noopener">차트</a>' : '-';
+    var dart = r[4] ? '<a class="btn" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo='+encodeURIComponent(r[4])+'" target="_blank" rel="noopener">원문</a>' : '-';
+    return '<tr><td>'+esc(r[0])+'</td><td class="num">'+esc(r[1]||'-')+'</td><td class="num">'+qty+'</td><td class="num">'+esc(r[3])+'</td><td>'+chart+'</td><td>'+dart+'</td></tr>';
   }).join('');
   var f=data.f13, note=document.getElementById('f13-note'), body=document.getElementById('f13rows');
   if(!f||!f.rows||!f.rows.length){
@@ -440,7 +448,7 @@ document.getElementById('fm-clear').addEventListener('click',function(){fm={};fm
 function pull(){
   try{ fetch('trend.json?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(j&&j.stocks){
-      data={generatedAt:j.generatedAt,priceAt:j.priceAt,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],f13:j.f13||null,nps:j.nps||SAMPLE.nps};
+      data={generatedAt:j.generatedAt,priceAt:j.priceAt,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
       ensureDictStocks(); head(); renderNps(); renderAll();
     }
   }).catch(function(){}); }catch(e){}
