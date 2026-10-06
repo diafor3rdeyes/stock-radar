@@ -53,7 +53,6 @@ export async function onRequestPost({ request, env }) {
     try { list = JSON.parse((await env.RADAR.get("stopwords")) || "[]"); } catch { list = []; }
     if (b.stop) {
       if (!list.includes(w)) {
-        if (list.length >= 500) return json({ ok: false, error: "제거 단어는 최대 500개입니다" }, 400);
         list.push(w);
       }
     } else {
@@ -76,7 +75,6 @@ export async function onRequestPost({ request, env }) {
     const code = String(b.code || "").trim().toUpperCase();
     if (!name || name.length > 30) return json({ ok: false, error: "풀네임이 비었거나 너무 깁니다" }, 400);
     if (!/^[A-Z0-9.\-]{0,12}$/.test(code)) return json({ ok: false, error: "종목코드 형식이 올바르지 않습니다" }, 400);
-    if (!(abbr in map) && Object.keys(map).length >= 300) return json({ ok: false, error: "연결은 최대 300개입니다" }, 400);
     map[abbr] = { name, code };
   }
   await env.RADAR.put("aliases", JSON.stringify(map));
