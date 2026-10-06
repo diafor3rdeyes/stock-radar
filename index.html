@@ -107,7 +107,7 @@ body{margin:0}
 <div class="wrap">
   <div class="top">
     <h1>종목 레이더</h1>
-    <span class="stamp" id="stamp"></span>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0"><span class="stamp" id="stamp"></span><span class="stamp" id="refresh"></span><button class="btn" id="reload" style="margin-top:4px">지금 새로고침</button></div>
   </div>
   <div class="banner" id="banner"></div>
 
@@ -395,8 +395,24 @@ function renderNps(){
 }
 function renderAll(){ renderFilters(); var l=compute(); renderRows(l); renderAlerts(l); }
 
+var POLL = 30, left = 30;
+function ago(iso){
+  if(!iso) return '';
+  var m = Math.round((Date.now()-new Date(iso).getTime())/60000);
+  if(m<1) return '방금'; if(m<60) return m+'분 전';
+  return Math.floor(m/60)+'시간 '+(m%60)+'분 전';
+}
+function marketHours(){
+  var k = new Date(Date.now()+9*3600000), d = k.getUTCDay(), m = k.getUTCHours()*60+k.getUTCMinutes();
+  return d>=1 && d<=5 && m>=540 && m<=940;
+}
 function head(){
-  document.getElementById('stamp').textContent = data.isSample ? '데이터: 샘플' : '집계 '+data.generatedAt+' · 시세 '+(data.priceAt||'없음');
+  var st=document.getElementById('stamp'), rf=document.getElementById('refresh');
+  if(data.isSample){ st.textContent='데이터: 샘플'; }
+  else { st.textContent='집계 '+data.generatedAt+(data.generatedISO?' ('+ago(data.generatedISO)+')':'')+' · 시세 '+(data.priceAt||'없음')+(data.priceISO?' ('+ago(data.priceISO)+')':''); }
+  var warn = (!data.isSample && data.priceISO && marketHours() && (Date.now()-new Date(data.priceISO).getTime())>40*60000)
+    ? ' · 시세가 40분 넘게 갱신되지 않았습니다. 깃허브 Actions 상태를 확인하세요' : '';
+  rf.textContent = '시세는 평일 10분마다, 집계는 매일 09·15·21시에 갱신 · 이 화면은 '+left+'초 뒤 다시 읽습니다'+warn;
   document.getElementById('banner').textContent = data.isSample
     ? '커뮤니티 순위, 비중, 등락률은 화면 확인용 샘플 숫자입니다. 실제 값이 아닙니다. stock_radar.py를 실행해 trend.json을 만들면 실제 값으로 바뀝니다.'
     : '시세는 무료 시세원 기준이라 종목에 따라 지연될 수 있습니다. '+((data.skipped||[]).length ? '수집 제외: '+data.skipped.join(', ') : '');
@@ -448,7 +464,7 @@ document.getElementById('fm-clear').addEventListener('click',function(){fm={};fm
 function pull(){
   try{ fetch('trend.json?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(j&&j.stocks){
-      data={generatedAt:j.generatedAt,priceAt:j.priceAt,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
+      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
       ensureDictStocks(); head(); renderNps(); renderAll();
     }
   }).catch(function(){}); }catch(e){}
@@ -456,7 +472,8 @@ function pull(){
 (function init(){
   head(); renderNps(); renderAll();
   pull();
-  setInterval(pull, 60000); /* 시세는 스크립트가 trend.json을 갱신하는 주기에 맞춰 1분마다 반영 */
+  document.getElementById('reload').addEventListener('click',function(){pull();left=POLL;head();});
+  setInterval(function(){ left--; if(left<=0){ pull(); left=POLL; } head(); },1000);
 })();
 </script>
 </body>

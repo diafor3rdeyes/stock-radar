@@ -254,7 +254,7 @@ def main():
                     s["b"] = b
                 stocks.append(s)
         stocks.sort(key=lambda s: -sum(s["m"].values()))
-        out.update({"generatedAt": now_kst().strftime("%Y-%m-%d %H:%M"),
+        out.update({"generatedAt": now_kst().strftime("%Y-%m-%d %H:%M"), "generatedISO": now_kst().isoformat(),
                     "skipped": skipped, "stocks": stocks,
                     "dict": [{"name": n, "code": v[1], "tv": v[2], "aliases": v[0]} for n, v in STOCKS.items()]})
         nps = fetch_nps()
@@ -271,6 +271,7 @@ def main():
     for s in out.get("stocks", []):
         s.update(px.get(s["name"], {}))
     out["priceAt"] = at
+    out["priceISO"] = now_kst().isoformat()
     json.dump(out, open("trend.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"trend.json 저장: {len(out.get('stocks', []))}종목, 시세 {len(px)}건")
 
