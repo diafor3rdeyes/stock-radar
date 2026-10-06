@@ -5,6 +5,9 @@ on:
       mode:
         description: "full, trend, prices 중 하나"
         default: "trend"
+      ai:
+        description: "1이면 AI 요약을 지금 새로 만듭니다"
+        default: ""
   schedule:
     - cron: "0 0,6,12 * * *"
     - cron: "*/10 * * * 1-5"
@@ -20,6 +23,8 @@ jobs:
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       DART_API_KEY: ${{ secrets.DART_API_KEY }}
       SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      AI_FORCE: ${{ github.event.inputs.ai }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
