@@ -30,8 +30,8 @@ UA = "Mozilla/5.0 (compatible; StockRadar/0.1; personal use)"
 SEC_UA = os.environ.get("SEC_USER_AGENT", "StockRadar personal use your-email@example.com")  # SEC는 연락처 포함 UA를 요구
 DELAY = 0.7
 MAX_PAGES = 80          # 갤러리 하나당 최대 페이지 (오늘 글이 끝나면 먼저 멈춤)
-MIN_CAND = 4            # 후보 단어로 올리는 최소 언급 글 수
-MAX_CAND = 40           # 화면에 보낼 후보 단어 최대 개수
+MIN_CAND = 3            # 후보 단어로 올리는 최소 언급 글 수
+MAX_CAND = 100          # 화면에 보낼 후보 단어 최대 개수 (등록 종목과 합쳐 100위 이상 채우려고 100)
 BASE_DAYS = 7
 NPS_CIK = os.environ.get("NPS_CIK", "1608046")  # 실행 시 SEC 응답의 제출인 이름으로 한 번 더 검증함
 
@@ -78,9 +78,12 @@ def fetch_titles(url):
     목록은 최신순이라, 한 페이지에 오늘 글이 하나도 없으면 거기서 멈춘다."""
     today = now_kst().date().isoformat()
     titles, seen = [], set()
+    t0 = time.time()
+    info = {"pages": 0, "perPage": [], "stop": ""}
     for page in range(1, MAX_PAGES + 1):
         r = requests.get(f"{url}&page={page}", headers={"User-Agent": UA}, timeout=15)
         if r.status_code != 200:
+            info["stop"] = f"{page}페이지에서 접속 오류(HTTP {r.status_code})"
             break
         soup = BeautifulSoup(r.text, "html.parser")
         rows = soup.select("tr.ub-content")
@@ -105,10 +108,20 @@ def fetch_titles(url):
             t = a.get_text(strip=True) if a else ""
             if t:
                 titles.append(t)
-        if not rows or today_rows == 0:
+        info["pages"] = page
+        info["perPage"].append(today_rows)
+        if not rows:
+            info["stop"] = f"{page}페이지가 비어 있어 멈춤"
             break
+        if today_rows == 0:
+            info["stop"] = f"{page}페이지에 오늘 글이 없어 멈춤 (오늘 글 끝까지 읽음)"
+            break
+        if page == MAX_PAGES:
+            info["stop"] = f"최대 {MAX_PAGES}페이지에 도달 (오늘 글이 더 있을 수 있음)"
         time.sleep(DELAY)
-    return titles
+    info["sec"] = round(time.time() - t0, 1)
+    info["titles"] = len(titles)
+    return titles, info
 
 def count_mentions(titles):
     out = {}
@@ -123,6 +136,13 @@ STOP = set("""오늘 내일 어제 지금 진짜 그냥 이거 저거 그거 이
 어떻게 갤러리 갤럼 형님 형들 여러분 질문 추천 공지 후기 정리 주식 종목 매수 매도 상승 하락 급등 급락 가격 오른 내린 있음 없음 같음 같은
 하는 한다 했다 된다 이다 있다 없다 아님 맞음 하면 해서 해도 하고 하네 하냐 인가 인데 이면 이랑 에서 으로 까지 부터 보면 보니 많이 그래서
 이번주 다음주 지난 요즘 방금 다시 정리 좋은 나쁜 좋다 나쁘다 같다 어떤 모든 모두 제발 결국 사실 일단 혹시 역시 오히려 대충 갑자기 드디어""".split())
+def load_stop():
+    """화면에서 내가 제거한 단어(stopwords.json)를 제외 목록에 합친다."""
+    lst = load_json("stopwords.json", [])
+    if isinstance(lst, list):
+        STOP.update(str(w).strip() for w in lst if str(w).strip())
+    return sorted(w for w in lst if isinstance(w, str)) if isinstance(lst, list) else []
+
 _TOK = re.compile(r"[가-힣A-Za-z0-9]{2,}")
 _PART = "은는이가을를도만"
 
@@ -450,23 +470,27 @@ def fetch_13f():
 
 def _scan(sid, url):
     if not allowed(url):
-        return sid, None, f"{sid} (robots.txt로 자동 수집 불허 또는 확인 실패)"
+        return sid, None, "robots.txt로 자동 수집 불허 또는 확인 실패", None
     try:
-        return sid, fetch_titles(url), None
+        titles, info = fetch_titles(url)
+        return sid, titles, None, info
     except Exception as e:
-        return sid, None, f"{sid} ({e})"
+        return sid, None, str(e)[:120], None
 
 def collect_trend(out, old):
     """오늘 올라온 글 제목을 전부 모아 종목 언급 수를 세고, 등록 안 된 반복 단어도 후보로 센다."""
     from concurrent.futures import ThreadPoolExecutor
-    skipped, per_src = [], {}
+    skipped, per_src, log_src = [], {}, []
+    stop_list = load_stop()
     with ThreadPoolExecutor(max_workers=len(SOURCES)) as ex:
-        for sid, titles, err in ex.map(lambda kv: _scan(*kv), SOURCES.items()):
+        for sid, titles, err, info in ex.map(lambda kv: _scan(*kv), SOURCES.items()):
             if err:
-                skipped.append(err)
+                skipped.append(f"{sid} ({err})")
+                log_src.append({"id": sid, "error": err})
             else:
                 per_src[sid] = titles
-                print(f"{sid}: 오늘 글 {len(titles)}개")
+                log_src.append({"id": sid, **info})
+                print(f"{sid}: 오늘 글 {len(titles)}개, 1~{info['pages']}페이지, {info['stop']}")
     counts = {n: {} for n in STOCKS}
     wc = {}
     known = [a for v in STOCKS.values() for a in v[0]] + list(STOCKS)
@@ -501,6 +525,9 @@ def collect_trend(out, old):
     out.update({"generatedAt": now_kst().strftime("%Y-%m-%d %H:%M"), "generatedISO": now_kst().isoformat(),
                 "skipped": skipped, "stocks": stocks,
                 "titleCount": {k: len(v) for k, v in per_src.items()},
+                "stopWords": stop_list,
+                "runLog": ([{"at": now_kst().strftime("%Y-%m-%d %H:%M:%S"), "sources": log_src}]
+                           + (old.get("runLog") or []))[:30],
                 "aliasMap": load_alias_map(),
                 "dict": [{"name": n, "code": v[1], "tv": v[2], "aliases": v[0]} for n, v in STOCKS.items()]})
 
@@ -557,6 +584,9 @@ def main():
         am = kv_get("aliases")
         if am:
             open("aliases.json", "w", encoding="utf-8").write(am)
+        sw = kv_get("stopwords")
+        if sw:
+            open("stopwords.json", "w", encoding="utf-8").write(sw)
     else:
         old = load_json("trend.json", {})
     if not old and mode != "filings":

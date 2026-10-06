@@ -46,9 +46,9 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
 .chip.off{opacity:.55}
 .dot{width:10px;height:10px;border-radius:2px;display:inline-block}
 .rows{display:flex;flex-direction:column}
-.row{display:grid;grid-template-columns:44px minmax(150px,1.1fr) minmax(200px,2fr) auto;gap:8px 16px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.row{display:grid;grid-template-columns:52px minmax(150px,1.1fr) minmax(200px,2fr) auto;gap:8px 16px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
 .row:first-child{border-top:0}
-.rank{font-family:var(--font-num);font-size:20px;font-weight:500}
+.rank{font-family:var(--font-num);font-size:18px;font-weight:500}
 .name{font-weight:700;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
 .code{font-family:var(--font-num);font-size:12px;color:var(--muted);font-weight:400}
 .meta{font-size:12px;color:var(--muted);font-family:var(--font-num);display:flex;flex-wrap:wrap;gap:2px 8px;align-items:center}
@@ -94,7 +94,7 @@ textarea{width:100%;min-height:96px;box-sizing:border-box;font:inherit;font-size
 .st-down{background:color-mix(in srgb,var(--down) 16%,transparent);color:var(--down)}
 .st-out{background:var(--line);color:var(--muted)}
 @media (max-width:640px){
-  .row{grid-template-columns:36px 1fr auto}
+  .row{grid-template-columns:44px 1fr auto}
   .row .bar{grid-column:1 / -1}
   .row .actions{grid-column:3;grid-row:1}
 }
@@ -115,6 +115,7 @@ body{margin:0}
     <button class="tab" role="tab" id="t-trend" aria-selected="true" aria-controls="p-trend">트렌드 알림</button>
     <button class="tab" role="tab" id="t-nps" aria-selected="false" aria-controls="p-nps">국민연금 포착</button>
     <button class="tab" role="tab" id="t-alert" aria-selected="false" aria-controls="p-alert">내 알림</button>
+    <button class="tab" role="tab" id="t-log" aria-selected="false" aria-controls="p-log">수집 로그</button>
     <button class="tab" role="tab" id="t-about" aria-selected="false" aria-controls="p-about">수집 방식</button>
   </div>
 
@@ -156,6 +157,16 @@ body{margin:0}
       <div class="rows" id="rows"></div>
     </div>
     <div class="card" id="amapcard" style="display:none"><h2>내가 연결한 줄임말</h2><div id="amap"></div></div>
+    <div class="card" style="display:flex;flex-direction:column;gap:8px">
+      <h2>제거할 단어</h2>
+      <p class="note">후보 단어 줄의 "제거" 버튼을 누르거나 여기에 직접 적으면, 그 단어는 앞으로 후보에서 빠집니다. 다음 집계부터 완전히 적용되고, 화면에서는 바로 사라집니다.</p>
+      <div class="actions" style="flex-wrap:wrap">
+        <input id="st-word" placeholder="빼고 싶은 단어" style="flex:1;min-width:150px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg)">
+        <button class="btn primary" id="st-add">제거 목록에 추가</button>
+      </div>
+      <span class="note" id="st-msg"></span>
+      <div id="stlist" class="meta"></div>
+    </div>
     <p class="note">화제성 점수 = (지금 언급 수 − 평소 언급 수) ÷ √(평소 + 1) × (1 + 0.15 × 언급된 커뮤니티 수 − 0.15). 어제도 오늘도 50건이면 0점이고, 평소 1건이던 종목이 50건이 되면 약 35점이라 크게 앞섭니다. 평소는 최근 7일 평균입니다. FM코리아는 직전에 붙여넣은 값이 평소가 됩니다.</p>
   </section>
 
@@ -229,6 +240,14 @@ body{margin:0}
   </section>
 
   <!-- 수집 방식 -->
+  <section class="panel" id="p-log" role="tabpanel" aria-labelledby="t-log" hidden>
+    <div class="card">
+      <h2>수집 로그</h2>
+      <p class="note">실행할 때마다 갤러리별로 몇 페이지부터 몇 페이지까지 읽었는지, 오늘 글이 몇 개였는지, 왜 멈췄는지를 기록합니다. 최근 30회까지 남습니다.</p>
+      <div id="logbox"></div>
+    </div>
+  </section>
+
   <section class="panel" id="p-about" role="tabpanel" aria-labelledby="t-about" hidden>
     <div class="card" style="display:flex;flex-direction:column;gap:10px">
       <h2>데이터가 들어오는 길</h2>
@@ -311,7 +330,7 @@ function compute(){
     var surge = ready ? Math.max(0,(total-base)/Math.sqrt(base+1)) : total*0.05;
     var score = surge*(1+0.15*Math.max(n-1,0));
     return {s:s,m:m,total:total,base:base,ready:ready,n:n,score:score};
-  }).filter(function(x){return x.total>0 && (showCand || !x.s.cand);});
+  }).filter(function(x){return x.total>0 && (!x.s.cand || (showCand && stopList.indexOf(x.s.name)<0));});
   list.sort(function(a,b){return (b.score-a.score)||(b.total-a.total);});
   list.forEach(function(x,i){x.rank=i+1;});
   return list;
@@ -342,7 +361,7 @@ function renderFilters(){
 function renderRows(list){
   var el=document.getElementById('rows');
   if(!list.length){el.innerHTML='<p class="note">선택한 커뮤니티에서 집계된 종목이 없습니다.</p>';return;}
-  var view = list.slice(0,15);
+  var view = list.slice(0,100);
   if(sortBy==='chg') view = view.slice().sort(function(a,b){return (b.s.chg==null?-99:b.s.chg)-(a.s.chg==null?-99:a.s.chg);});
   el.innerHTML = view.map(function(x){
     var s=x.s, d = s.prev==null ? null : s.prev - x.rank;
@@ -358,8 +377,9 @@ function renderRows(list){
       '<div><div class="name"><button class="star" data-w="'+esc(wk(s))+'" aria-pressed="'+(!!watch[wk(s)])+'" aria-label="'+esc(s.name)+' 관심 종목">'+(watch[wk(s)]?'★':'☆')+'</button>'+esc(s.name)+' <span class="code">'+esc(s.code)+'</span></div>'+
       '<div class="meta">'+(x.ready?'평소 '+x.base+' → 지금 '+x.total+'건 (×'+(x.total/Math.max(x.base,1)).toFixed(1)+') · 점수 '+x.score.toFixed(0):'평소 기준 수집 중 · 언급 '+x.total+'건')+' &nbsp;'+delta+' '+hot+' '+multi+'</div></div>'+
       '<div class="bar" role="img" aria-label="출처별 언급 비중">'+segs+'</div>'+
-      '<div class="actions">'+pxHtml(s)+(s.cand?'<button class="btn primary" data-al="'+esc(s.name)+'">풀네임 연결</button>':(s.tv?'<a class="btn primary" href="'+tvUrl(s.tv)+'" target="_blank" rel="noopener">차트 분석</a>':'<a class="btn" href="https://search.naver.com/search.naver?query='+encodeURIComponent(s.name+' 주가')+'" target="_blank" rel="noopener">주가 검색</a>'))+'</div></div>';
+      '<div class="actions">'+pxHtml(s)+(s.cand?'<button class="btn primary" data-al="'+esc(s.name)+'">풀네임 연결</button><button class="btn" data-st="'+esc(s.name)+'">제거</button>':(s.tv?'<a class="btn primary" href="'+tvUrl(s.tv)+'" target="_blank" rel="noopener">차트 분석</a>':'<a class="btn" href="https://search.naver.com/search.naver?query='+encodeURIComponent(s.name+' 주가')+'" target="_blank" rel="noopener">주가 검색</a>'))+'</div></div>';
   }).join('');
+  el.querySelectorAll('[data-st]').forEach(function(b){ b.addEventListener('click',function(){ addStop(b.dataset.st); }); });
   el.querySelectorAll('[data-al]').forEach(function(b){ b.addEventListener('click',function(){ openAlias(b.dataset.al); }); });
   el.querySelectorAll('.star').forEach(function(b){
     b.addEventListener('click',function(){
@@ -489,7 +509,7 @@ function requestRefresh(){
     }, 5000);
   }).catch(function(){ setStat('수집 요청을 보내지 못했습니다.'); pull(); endRefresh(); });
 }
-var aliasMap = {}, alAbbr = '';
+var aliasMap = {}, alAbbr = '', stopList = [];
 function aliasBox(show){ var b=document.getElementById('aliasbox'); b.hidden=!show; b.style.display=show?'flex':'none'; }
 function openAlias(abbr){
   alAbbr=abbr;
@@ -514,11 +534,48 @@ function renderAmap(){
   var keys=Object.keys(aliasMap), card=document.getElementById('amapcard');
   card.style.display=keys.length?'block':'none';
   document.getElementById('amap').innerHTML=keys.map(function(k){
-    var v=aliasMap[k]; return '<div class="alert"><b>'+esc(k)+'</b> → '+esc(v.name)+' <span class="code">'+esc(v.code||'')+'</span><button class="btn" style="margin-left:auto" data-rm="'+esc(k)+'">삭제</button></div>';
+    var v=aliasMap[k]; return '<div class="alert"><b>'+esc(k)+'</b> → '+esc(v.name)+' <span class="code">'+esc(v.code||'')+'</span><span style="margin-left:auto;display:flex;gap:6px"><button class="btn" data-ed="'+esc(k)+'">수정</button><button class="btn" data-rm="'+esc(k)+'">삭제</button></span></div>';
   }).join('');
+  document.querySelectorAll('[data-ed]').forEach(function(b){ b.addEventListener('click',function(){
+    var v=aliasMap[b.dataset.ed]||{}; openAlias(b.dataset.ed);
+    document.getElementById('al-name').value=v.name||''; document.getElementById('al-code').value=v.code||'';
+    document.getElementById('alias-title').textContent='"'+b.dataset.ed+'" 연결 수정';
+  }); });
   document.querySelectorAll('[data-rm]').forEach(function(b){ b.addEventListener('click',function(){
     sendAlias({abbr:b.dataset.rm,remove:true},function(t){ setStat(t+' 삭제는 다음 집계부터 반영됩니다.'); });
   }); });
+}
+function sendStop(body,done){
+  fetch('/api/alias',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    return r.json().catch(function(){return {};}).then(function(j){return {status:r.status,j:j};});
+  }).then(function(x){
+    if(x.status===404||x.status===503){ done('저장 기능이 아직 설정되지 않았습니다(서버 연결 필요).',false); return; }
+    if(!x.j.ok){ done('저장하지 못했습니다: '+(x.j.error||x.status),false); return; }
+    stopList=x.j.stop||[]; renderStops(); renderAll(); done('저장했습니다.',true);
+  }).catch(function(){ done('저장 요청을 보내지 못했습니다.',false); });
+}
+function addStop(w){ w=(w||'').trim(); if(!w) return; sendStop({stop:w},function(t){ document.getElementById('st-msg').textContent='"'+w+'" '+t; }); }
+function renderStops(){
+  document.getElementById('stlist').innerHTML = stopList.length ? stopList.map(function(w){
+    return '<span class="badge">'+esc(w)+' <button class="btn" style="padding:0 6px" data-un="'+esc(w)+'" aria-label="'+esc(w)+' 복원">복원</button></span>';
+  }).join(' ') : '<span class="note">아직 없습니다.</span>';
+  document.querySelectorAll('[data-un]').forEach(function(b){ b.addEventListener('click',function(){
+    sendStop({unstop:b.dataset.un},function(t){ document.getElementById('st-msg').textContent='"'+b.dataset.un+'" 복원: '+t; });
+  }); });
+}
+function renderLog(){
+  var L=data.runLog||[], box=document.getElementById('logbox');
+  if(!L.length){ box.innerHTML='<p class="note">아직 기록이 없습니다. 다음 집계부터 쌓입니다.</p>'; return; }
+  var nm={neostock:'주식갤',krstock:'한국주식갤',stockus:'미국주식갤',tenbagger:'해외주식갤',invest:'투자갤',fmkorea:'FM코리아'};
+  box.innerHTML=L.map(function(run,i){
+    var rows=run.sources.map(function(x){
+      if(x.error) return '<tr><td>'+esc(nm[x.id]||x.id)+'</td><td colspan="4" class="pending">수집 안 함: '+esc(x.error)+'</td></tr>';
+      var range = x.pages ? '1 ~ '+x.pages+'페이지' : '읽은 페이지 없음';
+      var pp = (x.perPage||[]).map(function(n,k){return (k+1)+'p:'+n;}).join(' ');
+      return '<tr><td>'+esc(nm[x.id]||x.id)+'</td><td class="num">'+range+'</td><td class="num">'+(x.titles||0).toLocaleString('ko-KR')+'개</td><td class="num">'+(x.sec==null?'-':x.sec+'초')+'</td><td style="white-space:normal">'+esc(x.stop||'')+(pp?'<br><span class="note">페이지별 오늘 글: '+esc(pp)+'</span>':'')+'</td></tr>';
+    }).join('');
+    return '<details'+(i===0?' open':'')+' style="margin-bottom:8px"><summary><b>'+esc(run.at)+'</b> 집계</summary><div class="tablebox"><table><thead><tr><th>사이트</th><th>읽은 범위</th><th>오늘 글</th><th>걸린 시간</th><th>멈춘 이유</th></tr></thead><tbody>'+rows+'</tbody></table></div></details>';
+  }).join('');
 }
 function countFm(){
   var lines=document.getElementById('fmtext').value.split('\n').map(function(l){return l.trim();}).filter(Boolean);
@@ -555,6 +612,7 @@ document.getElementById('onlyMulti').checked=prefs.onlyMulti;
 document.getElementById('jump').addEventListener('input',function(e){prefs.jump=Math.max(1,parseInt(e.target.value)||3);save('sr-prefs',prefs);renderAll();});
 document.getElementById('onlyMulti').addEventListener('change',function(e){prefs.onlyMulti=e.target.checked;save('sr-prefs',prefs);renderAll();});
 document.getElementById('fm-add').addEventListener('click',countFm);
+document.getElementById('st-add').addEventListener('click',function(){ var i=document.getElementById('st-word'); addStop(i.value); i.value=''; });
 document.getElementById('showCand').addEventListener('change',function(e){showCand=e.target.checked;renderAll();});
 document.getElementById('al-cancel').addEventListener('click',function(){aliasBox(false);});
 document.getElementById('al-save').addEventListener('click',function(){
@@ -578,14 +636,14 @@ document.getElementById('fm-clear').addEventListener('click',function(){fm={};fm
 function pull(){
   try{ fetch('trend.json?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(j&&j.stocks){
-      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
-      aliasMap=j.aliasMap||aliasMap; renderAmap();
+      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,runLog:j.runLog||[],f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
+      aliasMap=j.aliasMap||aliasMap; stopList=j.stopWords||stopList; renderAmap(); renderStops(); renderLog();
       ensureDictStocks(); head(); renderNps(); renderAll();
     }
   }).catch(function(){}); }catch(e){}
 }
 (function init(){
-  head(); renderNps(); renderAll();
+  head(); renderNps(); renderAll(); renderStops(); renderLog();
   pull();
   document.getElementById('reload').addEventListener('click',requestRefresh);
   setInterval(function(){ left--; if(left<=0){ pull(); left=POLL; } head(); },1000);
