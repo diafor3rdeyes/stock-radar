@@ -36,6 +36,7 @@ jobs:
           curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/trend" -o trend.json || true
           curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/history" -o history.json || true
           curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/aliases" -o aliases.json || true
+          curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/stopwords" -o stopwords.json || true
 
       - name: 실행
         run: |
