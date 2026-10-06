@@ -28,8 +28,12 @@ jobs:
 
       - name: KV에서 이전 결과 내려받기
         run: |
+          CF_ACCOUNT_ID=$(printf %s "$CF_ACCOUNT_ID" | tr -cd 'a-zA-Z0-9')
+          CF_KV_NAMESPACE_ID=$(printf %s "$CF_KV_NAMESPACE_ID" | tr -cd 'a-zA-Z0-9')
+          CF_API_TOKEN=$(printf %s "$CF_API_TOKEN" | tr -cd 'a-zA-Z0-9_-')
+          echo "계정번호 길이 ${#CF_ACCOUNT_ID}, 보관함번호 길이 ${#CF_KV_NAMESPACE_ID} (둘 다 32여야 정상)"
           KV="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/storage/kv/namespaces/$CF_KV_NAMESPACE_ID/values"
-          curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/trend"   -o trend.json   || true
+          curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/trend" -o trend.json || true
           curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/history" -o history.json || true
 
       - name: 실행
@@ -42,11 +46,14 @@ jobs:
 
       - name: KV에 올리기
         run: |
+          CF_ACCOUNT_ID=$(printf %s "$CF_ACCOUNT_ID" | tr -cd 'a-zA-Z0-9')
+          CF_KV_NAMESPACE_ID=$(printf %s "$CF_KV_NAMESPACE_ID" | tr -cd 'a-zA-Z0-9')
+          CF_API_TOKEN=$(printf %s "$CF_API_TOKEN" | tr -cd 'a-zA-Z0-9_-')
           KV="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/storage/kv/namespaces/$CF_KV_NAMESPACE_ID/values"
-          code=$(curl -s -o resp.txt -w "%{http_code}" -X PUT -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: text/plain" --data-binary @trend.json "$KV/trend")
+          code=$(curl -s -o resp.txt -w "%{http_code}" -X PUT -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: text/plain" --data-binary @trend.json "$KV/trend" || true)
           echo "HTTP $code"
-          cat resp.txt
+          cat resp.txt || true
           [ "$code" = "200" ]
           if [ -f history.json ]; then
-            curl -s -o /dev/null -X PUT -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: text/plain" --data-binary @history.json "$KV/history"
+            curl -s -o /dev/null -X PUT -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: text/plain" --data-binary @history.json "$KV/history" || true
           fi
