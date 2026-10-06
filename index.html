@@ -63,7 +63,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
 .chip.off{opacity:.55}
 .dot{width:10px;height:10px;border-radius:2px;display:inline-block}
 .rows{display:flex;flex-direction:column}
-.row{display:grid;grid-template-columns:52px minmax(150px,1.1fr) minmax(200px,2fr) auto;gap:8px 16px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.row{display:grid;grid-template-columns:44px minmax(170px,1.2fr) minmax(220px,2fr) 370px;gap:8px 16px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
 .row:first-child{border-top:0}
 .rank{font-family:var(--font-num);font-size:18px;font-weight:500}
 .name{font-weight:700;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
@@ -119,10 +119,18 @@ textarea{width:100%;min-height:96px;box-sizing:border-box;font:inherit;font-size
 .namebtn{background:none;border:0;padding:0;font:inherit;font-weight:800;color:inherit;cursor:pointer;text-align:left}
 .namebtn:hover{color:var(--accent);text-decoration:underline;text-underline-offset:4px}
 .namebtn .car{font-size:11px;color:var(--muted)}
-@media (max-width:640px){
-  .row{grid-template-columns:44px 1fr auto}
-  .row .bar{grid-column:1 / -1}
+.row .actions{justify-content:flex-end}
+.row .actions .px{margin-right:auto;min-width:0;text-align:left}
+@media (max-width:980px) and (min-width:641px){
+  .row{grid-template-columns:44px 1fr 1fr}
+  .row .bar{grid-column:2 / 4;grid-row:2}
   .row .actions{grid-column:3;grid-row:1}
+}
+@media (max-width:640px){
+  .row{grid-template-columns:44px minmax(0,1fr)}
+  .row .bar{grid-column:1 / -1;grid-row:2}
+  .row .actions{grid-column:1 / -1;grid-row:3;flex-wrap:wrap;justify-content:flex-start}
+  .row .actions .px{margin-right:8px}
 }
 @media (prefers-reduced-motion:no-preference){.seg{transition:width .25s}}
 /* 전체 글꼴 통일: 모든 글자를 맨 위 제목과 같은 글꼴로, 두께도 한 단계씩 올려 같은 느낌으로 */
@@ -135,6 +143,7 @@ h2{font-weight:900}
 .topbar{font-weight:700}
 body{margin:0}
 .post mark{background:rgba(185,121,31,.28);color:inherit;border-radius:3px;padding:0 2px}
+#aliasbox{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(580px,92vw);max-height:88vh;overflow:auto;z-index:90;box-shadow:0 0 0 100vmax rgba(10,14,24,.5),0 12px 40px rgba(0,0,0,.35)}
 </style>
 </head>
 <body>
@@ -191,18 +200,7 @@ body{margin:0}
       <textarea id="nvtext" placeholder="예)&#10;펩트론&#10;에코프로&#10;에코프로"></textarea>
       <div class="actions"><button class="btn primary" id="nv-add">집계해서 반영</button><button class="btn" id="nv-clear">초기화</button><span class="note" id="nv-msg"></span></div>
     </div>
-    <div class="card" id="aliasbox" hidden style="display:none;flex-direction:column;gap:8px">
-      <h2 id="alias-title">풀네임 연결</h2>
-      <p class="note">이 줄임말이 어느 종목인지 적어 주세요. 저장하면 다음 집계부터 그 종목의 언급으로 합쳐지고, 시세와 차트가 붙습니다. 종목코드는 한국 종목은 숫자 6자리(예 035720), 미국 종목은 티커(예 AAPL)입니다. 이미 있는 종목(예 SK하이닉스)은 코드를 비워도 됩니다.</p>
-      <div class="actions" style="flex-wrap:wrap">
-        <input id="al-name" placeholder="풀네임 (예 카카오)" style="flex:1;min-width:150px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg)">
-        <input id="al-code" placeholder="종목코드/티커" style="width:140px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg)">
-        <button class="btn primary" id="al-save">저장하고 반영</button>
-        <button class="btn" id="al-cancel">닫기</button>
-      </div>
-      <datalist id="al-list"></datalist>
-      <span class="note" id="al-msg"></span>
-    </div>
+
     <div class="card">
       <div class="legend" id="legend" style="margin-bottom:8px"></div>
       <div class="rows" id="rows"></div>
@@ -348,6 +346,18 @@ body{margin:0}
   <p class="note">공시와 커뮤니티 글을 모은 참고 자료이며 매수·매도 권유가 아닙니다.</p>
 </div>
 
+    <div class="card" id="aliasbox" role="dialog" aria-modal="true" hidden style="display:none;flex-direction:column;gap:8px">
+      <h2 id="alias-title">풀네임 연결</h2>
+      <p class="note">이 줄임말이 어느 종목인지 적어 주세요. 저장하면 다음 집계부터 그 종목의 언급으로 합쳐지고, 시세와 차트가 붙습니다. 종목코드는 한국 종목은 숫자 6자리(예 035720), 미국 종목은 티커(예 AAPL)입니다. 이미 있는 종목(예 SK하이닉스)은 코드를 비워도 됩니다.</p>
+      <div class="actions" style="flex-wrap:wrap">
+        <input id="al-name" placeholder="풀네임 (예 카카오)" style="flex:1;min-width:150px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg)">
+        <input id="al-code" placeholder="종목코드/티커" style="width:140px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg)">
+        <button class="btn primary" id="al-save">저장하고 반영</button>
+        <button class="btn" id="al-cancel">닫기</button>
+      </div>
+      <datalist id="al-list"></datalist>
+      <span class="note" id="al-msg"></span>
+    </div>
 <script>
 var SOURCES = [
   {id:'neostock', name:'디시 주식갤', color:'var(--s1)'},
@@ -409,7 +419,7 @@ function compute(){
     var surge = ready ? Math.max(0,(total-base)/Math.sqrt(base+1)) : total*0.05;
     var score = surge*(1+0.15*Math.max(n-1,0));
     return {s:s,m:m,total:total,base:base,ready:ready,n:n,score:score};
-  }).filter(function(x){return x.total>0 && ((!x.s.cand || showCand) && stopList.indexOf(x.s.name)<0);});
+  }).filter(function(x){return x.total>0 && ((!x.s.cand || showCand) && !isStopped(x.s.name));});
   list.sort(function(a,b){return (b.score-a.score)||(b.total-a.total);});
   list.forEach(function(x,i){x.rank=i+1;});
   return list;
@@ -468,7 +478,7 @@ function computeRt(){
       if(c){ m[src.id]=c; total+=c; n++; }
     });
     return {s:s,m:m,total:total,base:0,ready:false,n:n,score:total};
-  }).filter(function(x){return x.total>0 && ((!x.s.cand || showCand) && stopList.indexOf(x.s.name)<0);});
+  }).filter(function(x){return x.total>0 && ((!x.s.cand || showCand) && !isStopped(x.s.name));});
   list.sort(function(a,b){return (b.total-a.total)||(b.n-a.n)||String(a.s.name).localeCompare(b.s.name);});
   list.forEach(function(x,i){x.rank=i+1;});
   return list;
@@ -716,7 +726,9 @@ function requestRefresh(){
     }, 5000);
   }).catch(function(){ setStat('수집 요청을 보내지 못했습니다.'); pull(); endRefresh(); });
 }
-var aliasMap = {}, alAbbr = '', stopList = load('sr-stop',[]), listsLoaded = false;
+var aliasMap = {}, alAbbr = '', stopList = load('sr-stop',[]), listsLoaded = false, localStop = load('sr-lstop',{});
+function isStopped(n){ return stopList.indexOf(n)>=0 || !!localStop[n]; }
+function allStops(){ var o=stopList.slice(); Object.keys(localStop).forEach(function(w){ if(o.indexOf(w)<0) o.push(w); }); return o; }
 function mergeLinked(){
   /* 풀네임을 연결한 줄임말 행은 같은 종목 행에 합친다(언급 수·평소 수 더하기). 같은 종목이 없으면 그 행을 그 종목으로 바꾼다. */
   var arr=data.stocks, out=[], byName={};
@@ -747,15 +759,169 @@ function loadLists(){
   }).catch(function(){});
 }
 function aliasBox(show){ var b=document.getElementById('aliasbox'); b.hidden=!show; b.style.display=show?'flex':'none'; }
+/* 자주 나오는 종목 사전: [종목명, 코드(한국 6자리 / 미국 티커), [별칭들]] — 풀네임 연결 때 이름만 적으면 코드·차트를 자동으로 붙인다 */
+var KDICT=[
+['알파벳(구글)','GOOGL',['구글','알파벳','google','alphabet','googl','goog']],
+['애플','AAPL',['애플','apple','aapl']],
+['마이크로소프트','MSFT',['마소','마이크로소프트','microsoft','msft']],
+['아마존','AMZN',['아마존','amazon','amzn']],
+['메타','META',['메타','페이스북','페북','meta']],
+['넷플릭스','NFLX',['넷플릭스','넷플','netflix','nflx']],
+['엔비디아','NVDA',['엔비디아','엔비','nvidia','nvda']],
+['테슬라','TSLA',['테슬라','tesla','tsla']],
+['팔란티어','PLTR',['팔란티어','pltr','palantir']],
+['AMD','AMD',['에이엠디','amd']],
+['인텔','INTC',['인텔','intel','intc']],
+['브로드컴','AVGO',['브로드컴','broadcom','avgo']],
+['마이크론','MU',['마이크론','micron','mu']],
+['TSMC','TSM',['티에스엠씨','대만반도체','tsmc','tsm']],
+['ASML','ASML',['에이에스엠엘','asml']],
+['퀄컴','QCOM',['퀄컴','qualcomm','qcom']],
+['코인베이스','COIN',['코인베이스','coinbase','coin']],
+['로빈후드','HOOD',['로빈후드','robinhood','hood']],
+['아이온큐','IONQ',['아이온큐','ionq']],
+['리게티','RGTI',['리게티','rgti']],
+['디웨이브','QBTS',['디웨이브','dwave','qbts']],
+['서클','CRCL',['서클','circle','crcl']],
+['마이크로스트래티지','MSTR',['마스트','마이크로스트래티지','mstr']],
+['오라클','ORCL',['오라클','oracle','orcl']],
+['세일즈포스','CRM',['세일즈포스','salesforce','crm']],
+['어도비','ADBE',['어도비','adobe','adbe']],
+['스노우플레이크','SNOW',['스노우플레이크','snowflake']],
+['크라우드스트라이크','CRWD',['크라우드스트라이크','crowdstrike','crwd']],
+['슈퍼마이크로컴퓨터','SMCI',['슈마컴','슈퍼마이크로','smci']],
+['코어위브','CRWV',['코어위브','coreweave','crwv']],
+['디즈니','DIS',['디즈니','disney','dis']],
+['나이키','NKE',['나이키','nike','nke']],
+['스타벅스','SBUX',['스타벅스','starbucks','sbux']],
+['코카콜라','KO',['코카콜라','코크','coca-cola','ko']],
+['보잉','BA',['보잉','boeing']],
+['일라이릴리','LLY',['일라이릴리','릴리','lilly','lly']],
+['노보노디스크','NVO',['노보노디스크','노보','nvo']],
+['화이자','PFE',['화이자','pfizer','pfe']],
+['모더나','MRNA',['모더나','moderna','mrna']],
+['JP모건','JPM',['제이피모건','jp모건','jpmorgan','jpm']],
+['비자','V',['비자','visa']],
+['마스터카드','MA',['마스터카드','mastercard']],
+['월마트','WMT',['월마트','walmart','wmt']],
+['코스트코','COST',['코스트코','costco','cost']],
+['우버','UBER',['우버','uber']],
+['에어비앤비','ABNB',['에어비앤비','airbnb','abnb']],
+['쇼피파이','SHOP',['쇼피파이','shopify','shop']],
+['리비안','RIVN',['리비안','rivian','rivn']],
+['루시드','LCID',['루시드','lucid','lcid']],
+['니오','NIO',['니오','nio']],
+['알리바바','BABA',['알리바바','alibaba','baba']],
+['쿠팡','CPNG',['쿠팡','coupang','cpng']],
+['TQQQ','TQQQ',['티큐','tqqq','나스닥3배']],
+['SOXL','SOXL',['속슬','soxl','반도체3배']],
+['SOXS','SOXS',['속스','soxs']],
+['QQQ','QQQ',['큐큐큐','qqq','나스닥100']],
+['SPY','SPY',['spy','에스앤피500','s&p500']],
+['SCHD','SCHD',['스커디','schd']],
+['TSLL','TSLL',['tsll','테슬라2배']],
+['삼성전자','005930',['삼전','삼성전자']],
+['SK하이닉스','000660',['하이닉스','하닉','닉스','sk하이닉스']],
+['LG에너지솔루션','373220',['엘지엔솔','엔솔','lg에너지솔루션','엘지에너지솔루션']],
+['삼성바이오로직스','207940',['삼바','삼성바이오로직스','삼성바이오']],
+['현대차','005380',['현대차','현차','현대자동차']],
+['기아','000270',['기아','기아차']],
+['셀트리온','068270',['셀트리온','셀트']],
+['KB금융','105560',['kb금융','케이비금융','국민은행']],
+['신한지주','055550',['신한지주','신한금융']],
+['하나금융지주','086790',['하나금융','하나금융지주']],
+['우리금융지주','316140',['우리금융','우리금융지주']],
+['POSCO홀딩스','005490',['포스코홀딩스','포스코','posco홀딩스']],
+['NAVER','035420',['네이버','naver']],
+['카카오','035720',['카카오','카톡']],
+['삼성SDI','006400',['삼성sdi','삼성에스디아이','삼성sdi']],
+['LG화학','051910',['lg화학','엘지화학']],
+['현대모비스','012330',['현대모비스','모비스']],
+['삼성물산','028260',['삼성물산']],
+['삼성생명','032830',['삼성생명']],
+['삼성화재','000810',['삼성화재']],
+['한화에어로스페이스','012450',['한화에어로','한화에어로스페이스','한에로']],
+['현대로템','064350',['현대로템','로템']],
+['두산에너빌리티','034020',['두산에너빌','두에빌','두산에너빌리티']],
+['HD현대중공업','329180',['현대중공업','hd현대중공업','hd현중']],
+['한화오션','042660',['한화오션','대우조선']],
+['HD한국조선해양','009540',['한국조선해양','hd한국조선해양']],
+['삼성중공업','010140',['삼성중공업','삼중']],
+['에코프로','086520',['에코프로']],
+['에코프로비엠','247540',['에코프로비엠','에코비엠']],
+['알테오젠','196170',['알테오젠','알테']],
+['펩트론','087010',['펩트론']],
+['HLB','028300',['hlb','에이치엘비']],
+['리가켐바이오','141080',['리가켐','리가켐바이오']],
+['레인보우로보틱스','277810',['레인보우로보틱스','레보']],
+['두산로보틱스','454910',['두산로보틱스','두로']],
+['크래프톤','259960',['크래프톤']],
+['엔씨소프트','036570',['엔씨소프트','엔씨','ncsoft']],
+['넷마블','251270',['넷마블']],
+['하이브','352820',['하이브']],
+['JYP Ent.','035900',['jyp','제이와이피','jyp ent.']],
+['에스엠','041510',['에스엠','sm엔터','sm']],
+['카카오뱅크','323410',['카카오뱅크','카뱅']],
+['카카오페이','377300',['카카오페이','카페']],
+['삼성전기','009150',['삼성전기','삼기']],
+['LG전자','066570',['lg전자','엘지전자']],
+['LG디스플레이','034220',['lg디스플레이','엘지디스플레이','엘디']],
+['한미반도체','042700',['한미반도체','한미']],
+['이수페타시스','007660',['이수페타시스','이수페타']],
+['리노공업','058470',['리노공업']],
+['주성엔지니어링','036930',['주성엔지니어링','주성']],
+['현대건설','000720',['현대건설','현건']],
+['대한항공','003490',['대한항공','대항']],
+['고려아연','010130',['고려아연']],
+['한국전력','015760',['한국전력','한전']],
+['한국항공우주','047810',['한국항공우주','kai','카이']],
+['LIG넥스원','079550',['lig넥스원','넥스원']],
+['SK이노베이션','096770',['sk이노베이션','에스케이이노베이션','sk이노']],
+['SK텔레콤','017670',['sk텔레콤','skt','에스케이텔레콤']],
+['KT','030200',['kt','케이티']],
+['SK','034730',['에스케이']],
+['LG','003550',['엘지']],
+['포스코퓨처엠','003670',['포스코퓨처엠','퓨처엠']],
+['포스코인터내셔널','047050',['포스코인터내셔널','포인']],
+['에이피알','278470',['에이피알','apr']],
+['삼양식품','003230',['삼양식품','불닭','삼양']],
+['오리온','271560',['오리온']],
+['농심','004370',['농심']],
+['아모레퍼시픽','090430',['아모레퍼시픽','아모레']],
+['한온시스템','018880',['한온시스템','한온']],
+['현대글로비스','086280',['현대글로비스','글로비스']],
+['효성중공업','298040',['효성중공업']],
+['HD현대일렉트릭','267260',['hd현대일렉트릭','현대일렉트릭','현대일렉']],
+['LS ELECTRIC','010120',['ls일렉트릭','엘에스일렉트릭','ls electric']],
+['대한전선','001440',['대한전선']],
+['한화시스템','272210',['한화시스템']],
+['한화솔루션','009830',['한화솔루션']],
+['테슬라','TSLA',['테슬라']]
+];
+function nk(s){ return String(s||'').toLowerCase().replace(/[\s.\-_·()]/g,''); }
+function lookupStock(q){
+  /* 이름(또는 줄임말) → {name, code, how}. 서버 사전 → 내장 사전 순서로 정확히 일치, 그다음 앞부분 일치 */
+  var k=nk(q); if(!k) return null;
+  var pools=[];
+  (data.dict||[]).concat((data.stocks||[]).filter(function(s){return !s.cand&&!s.named&&s.code&&s.code!=='-';})).forEach(function(s){
+    pools.push({name:s.name,code:s.code,keys:[s.name].concat(s.aliases||[]).map(nk)});
+  });
+  KDICT.forEach(function(d){ pools.push({name:d[0],code:d[1],keys:[d[0]].concat(d[2]).map(nk)}); });
+  var i,p;
+  for(i=0;i<pools.length;i++){ p=pools[i]; if(p.keys.indexOf(k)>=0) return {name:p.name,code:p.code}; }
+  if(k.length>=2){ for(i=0;i<pools.length;i++){ p=pools[i]; if(p.keys.some(function(x){return x.indexOf(k)===0;})) return {name:p.name,code:p.code}; } }
+  return null;
+}
 function openAlias(abbr){
   alAbbr=abbr;
   document.getElementById('alias-title').textContent='"'+abbr+'" 의 풀네임 연결';
   document.getElementById('al-name').value=''; document.getElementById('al-code').value='';
   document.getElementById('al-msg').textContent='';
-  var dl=document.getElementById('al-list'); dl.innerHTML=(data.dict||[]).map(function(d){return '<option value="'+esc(d.name)+'">';}).join('');
+  var auto=lookupStock(abbr);
+  if(auto){ document.getElementById('al-name').value=auto.name; document.getElementById('al-code').value=auto.code; document.getElementById('al-msg').textContent='자동으로 찾았습니다: '+auto.name+' ('+auto.code+') — 맞으면 "저장하고 반영"을 누르세요.'; }
+  var dl=document.getElementById('al-list'); dl.innerHTML=(data.dict||[]).map(function(d){return d.name;}).concat(KDICT.map(function(d){return d[0];})).filter(function(n,i,a){return a.indexOf(n)===i;}).map(function(n){return '<option value="'+esc(n)+'">';}).join('');
   document.getElementById('al-name').setAttribute('list','al-list');
   aliasBox(true); document.getElementById('al-name').focus();
-  document.getElementById('aliasbox').scrollIntoView({behavior:'smooth',block:'center'});
 }
 function sendAlias(body,done){
   fetch('/api/alias',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
@@ -796,7 +962,15 @@ function toast(msg,bad){
   el.style.background=bad?'#b3261e':'#121826'; el.style.color='#fff'; el.textContent=msg; el.style.display='block';
   clearTimeout(el._t); el._t=setTimeout(function(){ el.style.display='none'; },bad?9000:2500);
 }
-function addStop(w){ w=(w||'').trim(); if(!w) return; sendStop({stop:w},function(t,ok){ var m=document.getElementById('st-msg'); if(m) m.textContent='"'+w+'" '+t; toast(ok?'"'+w+'" 제거했습니다':'"'+w+'" 제거 실패 — '+t,!ok); }); }
+function addStop(w){
+  w=(w||'').trim(); if(!w) return;
+  localStop[w]=1; save('sr-lstop',localStop); renderStops(); renderAll();   // 서버 응답을 기다리지 않고 바로 화면에서 뺀다
+  sendStop({stop:w},function(t,ok){
+    var m=document.getElementById('st-msg'); if(m) m.textContent='"'+w+'" '+t;
+    if(ok){ delete localStop[w]; save('sr-lstop',localStop); toast('"'+w+'" 제거했습니다'); }
+    else toast('"'+w+'" 은(는) 이 브라우저 화면에서만 뺐습니다. 서버 저장 실패 — '+t,true);
+  });
+}
 var aiBusy=false;
 function aiPending(){
   var r=data.aiRequestedAt||0, at=data.aiSummary&&data.aiSummary.at?new Date(data.aiSummary.at).getTime():0;
@@ -895,10 +1069,12 @@ function renderAi(){
   meta.textContent=(a.error?'(최근 갱신 실패, 이전 요약을 보여 줍니다) ':'')+'오늘 글 '+(a.titles||0).toLocaleString('ko-KR')+'개 중 '+(a.sample||0).toLocaleString('ko-KR')+'개를 읽고 요약 · 글 제목에 적힌 내용만 근거로 함 · 버튼을 눌렀을 때만 갱신 · '+(a.at?ago(a.at):'')+' · AI가 쓴 글이라 틀릴 수 있습니다';
 }
 function renderStops(){
-  document.getElementById('stlist').innerHTML = stopList.length ? stopList.map(function(w){
+  var _all=allStops();
+  document.getElementById('stlist').innerHTML = _all.length ? _all.map(function(w){
     return '<span class="badge">'+esc(w)+' <button class="btn" style="padding:0 6px" data-un="'+esc(w)+'" aria-label="'+esc(w)+' 복원">복원</button></span>';
   }).join(' ') : '<span class="note">아직 없습니다.</span>';
   document.querySelectorAll('[data-un]').forEach(function(b){ b.addEventListener('click',function(){
+    delete localStop[b.dataset.un]; save('sr-lstop',localStop); renderAll();
     sendStop({unstop:b.dataset.un},function(t,ok){ document.getElementById('st-msg').textContent='"'+b.dataset.un+'" 복원: '+t; toast(ok?'"'+b.dataset.un+'" 복원했습니다':'복원 실패 — '+t,!ok); });
   }); });
 }
@@ -989,9 +1165,18 @@ document.getElementById('nv-clear').addEventListener('click',function(){nv={};nv
 document.getElementById('st-add').addEventListener('click',function(){ var i=document.getElementById('st-word'); addStop(i.value); i.value=''; });
 document.getElementById('showCand').addEventListener('change',function(e){showCand=e.target.checked;saveFilter();renderAll();});
 document.getElementById('al-cancel').addEventListener('click',function(){aliasBox(false);});
+document.addEventListener('keydown',function(e){ if(e.key==='Escape') aliasBox(false); });
+function autoFillCode(){
+  var n=document.getElementById('al-name').value.trim(), c=document.getElementById('al-code'), m=document.getElementById('al-msg');
+  var r=lookupStock(n); if(!r) return false;
+  document.getElementById('al-name').value=r.name; c.value=r.code; m.textContent='자동으로 찾았습니다: '+r.name+' ('+r.code+')'; return r;
+}
+document.getElementById('al-name').addEventListener('change',autoFillCode);
+document.getElementById('al-name').addEventListener('keydown',function(e){ if(e.key==='Enter'){ autoFillCode(); } });
 document.getElementById('al-save').addEventListener('click',function(){
   var name=document.getElementById('al-name').value.trim(), code=document.getElementById('al-code').value.trim(), msg=document.getElementById('al-msg');
   if(!name){ msg.textContent='풀네임을 적어 주세요.'; return; }
+  if(!code){ var f=lookupStock(name); if(f){ code=f.code; name=f.name; document.getElementById('al-code').value=code; document.getElementById('al-name').value=name; } }
   msg.textContent='저장하는 중…';
   sendAlias({abbr:alAbbr,name:name,code:code},function(t,ok){
     msg.textContent=t;
