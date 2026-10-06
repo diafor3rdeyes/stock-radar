@@ -35,6 +35,7 @@ jobs:
           KV="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/storage/kv/namespaces/$CF_KV_NAMESPACE_ID/values"
           curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/trend" -o trend.json || true
           curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/history" -o history.json || true
+          curl -sf -H "Authorization: Bearer $CF_API_TOKEN" "$KV/aliases" -o aliases.json || true
 
       - name: 실행
         run: |
