@@ -146,6 +146,9 @@ body{margin:0}
 #aliasbox{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(580px,92vw);max-height:88vh;overflow:auto;z-index:90;box-shadow:0 0 0 100vmax rgba(10,14,24,.5),0 12px 40px rgba(0,0,0,.35)}
 .cpy{background:none;border:0;padding:3px;margin:0 2px;border-radius:6px;color:var(--muted);cursor:pointer;line-height:0;vertical-align:middle;opacity:.65}
 .cpy:hover,.cpy:focus-visible{opacity:1;color:var(--accent);background:var(--soft)}
+.stampbadge{margin-left:auto;display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:999px;background:var(--soft);color:var(--fg);font-weight:800;font-size:13px;border:1px solid var(--line)}
+.stampbadge.stale{background:#fdecea;color:#b3261e;border-color:#f3b8b3}
+:root[data-theme="dark"] .stampbadge.stale{background:#3a1d1a;color:#ffb4ab;border-color:#6b2f29}@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .stampbadge.stale{background:#3a1d1a;color:#ffb4ab;border-color:#6b2f29}}
 </style>
 </head>
 <body>
@@ -224,8 +227,13 @@ body{margin:0}
   <!-- 실시간 언급 -->
   <section class="panel" id="p-rt" role="tabpanel" aria-labelledby="t-rt">
     <div class="card" style="display:flex;flex-direction:column;gap:10px">
-      <div class="filters"><span class="note">기간</span><span class="seg-toggle" role="group" aria-label="기간" id="rt-seg"></span></div>
+      <div class="filters"><span class="note">기간</span><span class="seg-toggle" role="group" aria-label="기간" id="rt-seg"></span><span class="stampbadge" id="rt-stamp"></span></div>
       <p class="note" id="rt-note"></p>
+    </div>
+    <div class="card" id="rt-ai" style="display:flex;flex-direction:column;gap:6px">
+      <div class="actions" style="justify-content:space-between;flex-wrap:wrap"><h2 style="margin:0" id="rt-ai-title">이 기간 AI 요약</h2><span><span class="note" id="rt-ai-stat"></span> <button class="btn primary" id="rt-ai-btn">AI 요약하기</button></span></div>
+      <span class="note" id="rt-ai-meta"></span>
+      <div id="rt-ai-lines" class="note"></div>
     </div>
     <div class="card"><div class="rows" id="rt-rows"></div></div>
   </section>
@@ -238,7 +246,7 @@ body{margin:0}
         <input id="sr-q" placeholder="예) 삼전, 하닉, 반도체" style="flex:1;min-width:200px;font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--fg)">
         <button class="btn primary" id="sr-go">검색</button>
       </div>
-      <div class="filters"><span class="note">기간</span><span class="seg-toggle" role="group" aria-label="검색 기간" id="sr-seg"></span></div>
+      <div class="filters"><span class="note">기간</span><span class="seg-toggle" role="group" aria-label="검색 기간" id="sr-seg"></span><span class="stampbadge" id="sr-stamp"></span></div>
       <p class="note" id="sr-note"></p>
     </div>
     <div class="card" style="display:flex;flex-direction:column;gap:8px"><div id="sr-sum" class="actions" style="flex-wrap:wrap"></div><div id="sr-list" class="rows"></div></div>
@@ -506,6 +514,7 @@ function loadSr(){
   }).then(function(j){ if(j){ srPosts=j; srErr=''; srAt=j.at||''; } renderSr(); }).catch(function(){ srErr='글 목록을 불러오지 못했습니다.'; renderSr(); });
 }
 function renderSr(){
+  updStamp();
   var seg=document.getElementById('sr-seg'); if(!seg) return;
   seg.innerHTML=RT_OPTS.map(function(o){return '<button data-sr="'+o[0]+'" aria-pressed="'+(o[0]===srH)+'">'+(o[0]===1440?'24시간':o[1])+'</button>';}).join('');
   seg.querySelectorAll('[data-sr]').forEach(function(b){ b.addEventListener('click',function(){ srH=parseInt(b.dataset.sr); save('sr-hm',srH); srMore=false; renderSr(); }); });
@@ -536,12 +545,74 @@ function srStart(){
   loadSr(); if(srTimer) clearInterval(srTimer);
   srTimer=setInterval(function(){ if(!document.getElementById('p-sr').hidden) loadSr(); },60000);
 }
+function updStamp(){
+  function put(id,label,iso,fallbackText){
+    var el=document.getElementById(id); if(!el) return;
+    if(!iso){ el.textContent='🕒 '+label+' 확인 중'; el.className='stampbadge'; return; }
+    var d=new Date(iso), m=Math.max(0,Math.round((Date.now()-d.getTime())/60000));
+    var k=new Date(d.getTime()+9*3600000), p=function(n){return ('0'+n).slice(-2);};
+    var hm=p(k.getUTCHours())+':'+p(k.getUTCMinutes()), day=p(k.getUTCMonth()+1)+'/'+p(k.getUTCDate());
+    var today=new Date(Date.now()+9*3600000), sameDay=(k.getUTCDate()===today.getUTCDate()&&k.getUTCMonth()===today.getUTCMonth());
+    el.textContent='🕒 '+label+' '+(sameDay?'':day+' ')+hm+' · '+ago(iso);
+    el.className='stampbadge'+(m>30&&marketHours()?' stale':'');
+    el.title=(m>30&&marketHours()?'수집이 30분 넘게 멈춰 있습니다. "지금 수집하기"를 눌러 보세요.':'')+'';
+  }
+  put('rt-stamp','마지막 수집',data.isSample?null:data.generatedISO);
+  put('sr-stamp','글 목록 갱신',srAt||null);
+}
+setInterval(updStamp,20000);
+var rtAiBusy=false;
+function rtAiPending(){
+  var r=data.aiRequestedAt||0, w=(data.aiWin||{})[rtH], at=w&&w.at?new Date(w.at).getTime():0;
+  return !data.isSample && r>0 && (Date.now()-r)<8*60000 && at<r;
+}
+function renderRtAi(){
+  var btn=document.getElementById('rt-ai-btn'); if(!btn) return;
+  var lab=rtLabel().replace('하루','24시간');
+  document.getElementById('rt-ai-title').textContent='최근 '+lab+' AI 요약';
+  var pend=rtAiPending(), st=document.getElementById('rt-ai-stat');
+  btn.textContent='AI 요약하기 (최근 '+lab+')'; btn.disabled=rtAiBusy||pend;
+  if(pend&&!rtAiBusy) st.textContent='요약 중… 새로고침해도 계속됩니다.';
+  else if(!pend&&!rtAiBusy&&/요약 중/.test(st.textContent)) st.textContent='요약 완료';
+  var box=document.getElementById('rt-ai-lines'), meta=document.getElementById('rt-ai-meta'), a=(data.aiWin||{})[rtH];
+  var u=data.aiUsage, per=(u&&u.calls)?fmtCost(u.usd/u.calls,u.krw||1400):'';
+  var costNote=' 누를 때만 요약하며, 한 번에 '+(per?'평균 '+per:'수 원')+' 듭니다.';
+  if(data.isSample){ box.textContent='샘플 화면에서는 요약이 나오지 않습니다.'; meta.textContent=''; return; }
+  if(!a||!a.lines){
+    box.textContent=(a&&a.error==='no_titles'?'이 기간에 올라온 글이 없습니다.':a&&a.error?'AI 요약을 만들지 못했습니다. 수집 로그(깃허브 Actions)를 확인하세요.':'아직 이 기간 요약이 없습니다. 버튼을 누르면 이 기간에 올라온 글 제목만 읽고 요약합니다.');
+    meta.textContent=costNote; return;
+  }
+  box.innerHTML='<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;color:var(--fg)">'+a.lines.map(function(l){return '<li>'+esc(l)+'</li>';}).join('')+'</ol>';
+  meta.textContent=(a.error?'(최근 갱신 실패, 이전 요약을 보여 줍니다) ':'')+'최근 '+lab+' 글 '+(a.titles||0).toLocaleString('ko-KR')+'개 중 '+(a.sample||0).toLocaleString('ko-KR')+'개를 읽고 요약 · 글 제목에 적힌 내용만 근거로 함 · '+(a.at?ago(a.at)+' 요약':'')+' · AI가 쓴 글이라 틀릴 수 있습니다.'+costNote;
+}
+function requestRtAi(){
+  if(rtAiBusy) return; rtAiBusy=true;
+  var st=document.getElementById('rt-ai-stat'), btn=document.getElementById('rt-ai-btn'), M=rtH;
+  btn.disabled=true; st.textContent='요약을 요청하는 중…';
+  var before=((data.aiWin||{})[M]||{}).at||'';
+  function end(t){ rtAiBusy=false; st.textContent=t||''; renderRtAi(); }
+  fetch('/api/summarize',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({minutes:M})}).then(function(r){
+    return r.json().catch(function(){return {};}).then(function(j){return {status:r.status,j:j};});
+  }).then(function(x){
+    if(x.status===404||x.status===503){ end('요약 요청 설정 전입니다(서버 연결 필요).'); return; }
+    if(x.status===429){ end((x.j.wait||120)+'초 뒤 다시 눌러 주세요.'); return; }
+    if(!x.j.ok){ end('요청에 실패했습니다.'); return; }
+    st.textContent='요약 중… 글을 다시 모으느라 2~4분 걸립니다. 새로고침해도 계속됩니다.';
+    var tries=0, iv=setInterval(function(){
+      tries++; pull();
+      var now=((data.aiWin||{})[M]||{}).at||'';
+      if(now!==before){ clearInterval(iv); end('요약 완료'); }
+      else if(tries>=96){ clearInterval(iv); end('8분이 지나도 안 바뀌었습니다. 깃허브 Actions를 확인하세요.'); }
+    },5000);
+  }).catch(function(){ end('요청을 보내지 못했습니다.'); });
+}
 function rtDelta(){
   /* 직전 수집이 몇 분 전이었는지. 같은 글 목록에서 그만큼 시간을 되돌려 '직전 수집 때 순위'를 다시 계산한다 */
   var g=new Date(data.generatedISO||0).getTime(), p=new Date(data.prevGeneratedISO||0).getTime();
   var m=Math.round((g-p)/60000); return (g>0&&p>0&&m>=1&&m<=180)?m:0;
 }
 function renderRt(){
+  updStamp(); renderRtAi();
   var seg=document.getElementById('rt-seg'); if(!seg) return;
   seg.innerHTML=RT_OPTS.map(function(o){return '<button data-rt="'+o[0]+'" aria-pressed="'+(o[0]===rtH)+'">'+o[1]+'</button>';}).join('');
   seg.querySelectorAll('[data-rt]').forEach(function(b){ b.addEventListener('click',function(){ rtH=parseInt(b.dataset.rt); save('sr-rtm',rtH); renderAll(); }); });
@@ -549,6 +620,9 @@ function renderRt(){
   document.getElementById('rt-note').textContent='디시인사이드 글의 작성 시각 기준, 지금('+hm(ref)+')부터 '+rtLabel().replace('하루','24시간')+' 전('+hm(ref-rtMax())+')까지 가장 많이 언급된 순서입니다. 자정을 넘어도 전날 글까지 이어서 셉니다. 제거한 단어·연결한 줄임말·커뮤니티 체크(트렌드 알림 탭)가 그대로 적용됩니다. FM코리아·네이버 붙여넣기는 글 시각이 없어 여기서는 제외됩니다. 잘못 뺀 단어는 트렌드 알림 탭 아래 "제거할 단어"에서 되돌릴 수 있습니다.';
   if(data.isSample){ document.getElementById('rt-rows').innerHTML='<p class="note">샘플 화면에서는 실시간 언급이 나오지 않습니다.</p>'; return; }
   var cur=computeRt(0), d=rtDelta();
+  var cn=document.getElementById('rt-cmp');
+  if(!cn){ cn=document.createElement('p'); cn.id='rt-cmp'; cn.className='note'; cn.style.fontWeight='800'; document.getElementById('rt-note').insertAdjacentElement('afterend',cn); }
+  cn.textContent = d>0 ? '직전 수집('+d+'분 전)과 비교한 순위 변화입니다. 🔺 상승 · 🆕 새로 진입 · 급상승(트렌드 알림 탭의 기준 칸 이상 올랐을 때).' : (data.prevGeneratedISO ? '직전 수집이 너무 오래전이라 순위 변화를 비교하지 않습니다.' : '순위 변화 표시 준비 중 — 최신 stock_radar.py를 올린 뒤 수집이 두 번 돌면 🔺가 나타납니다.');
   if(d>0){ var pm={}; computeRt(d).forEach(function(x){ pm[x.s.name]=x.rank; }); cur.forEach(function(x){ x.prevRank=pm[x.s.name]||null; x.cmp=true; }); }
   renderRows(cur,'rt-rows',true);
 }
@@ -577,9 +651,17 @@ function renderRows(list,elId,rt){
   el.innerHTML = view.map(function(x){
     var s=x.s, d = s.prev==null ? null : s.prev - x.rank;
     var delta = d==null ? '<span class="badge b-new">신규</span>' :
-      d>0 ? '<span class="delta up">🔺'+d+'위 상승</span>' : d<0 ? '<span class="delta down">▼'+(-d)+'</span>' : '<span class="delta flat">-</span>';
+      d>0 ? '<span class="delta up">🔺'+d+'위 상승</span>' : '';
     var hot = (d==null || d>=prefs.jump) ? '<span class="badge b-up">급상승</span>' : '';
-    if(rt){ hot=''; delta = !x.cmp ? '' : (x.prevRank==null ? '<span class="badge b-new">🆕 신규</span>' : (x.prevRank>x.rank ? '<span class="delta up">🔺'+(x.prevRank-x.rank)+'위 상승</span>' : '')); }
+    if(rt){
+      delta=''; hot='';
+      if(x.cmp){
+        if(x.prevRank==null){ delta='<span class="badge b-new">🆕 신규</span>'; hot='<span class="badge b-up">급상승</span>'; }
+        else { var rd=x.prevRank-x.rank;
+          delta = rd>0 ? '<span class="delta up">🔺'+rd+'위 상승</span>' : '';
+          if(rd>=prefs.jump) hot='<span class="badge b-up">급상승</span>'; }
+      }
+    }
     var key=(rt?'rt:':'')+s.name, pl=postsFor(s,rt);
     var multi = x.n>=3 ? '<span class="badge b-multi">'+x.n+'곳 동시</span>' : '';
     var segs = SOURCES.filter(function(src){return active[src.id] && (x.m[src.id]||0)>0;}).map(function(src){
@@ -1073,7 +1155,7 @@ function renderAiCost(){
   el.textContent='AI 사용량(추정): '+parts.join(' │ ')+'. 실제 청구액은 console.anthropic.com의 Usage에서 확인하세요.';
 }
 function renderAi(){
-  renderAiCost();
+  renderAiCost(); if(typeof renderRtAi==='function') renderRtAi();
   var pend=aiPending(), btn=document.getElementById('ai-btn');
   if(btn) btn.disabled = aiBusy || pend;
   if(pend && !aiBusy) document.getElementById('ai-stat').textContent='요약 중… 새로고침해도 계속됩니다.';
@@ -1179,6 +1261,7 @@ document.getElementById('jump').addEventListener('input',function(e){prefs.jump=
 document.getElementById('onlyMulti').addEventListener('change',function(e){prefs.onlyMulti=e.target.checked;save('sr-prefs',prefs);renderAll();});
 document.getElementById('fm-add').addEventListener('click',countFm);
 document.getElementById('ai-btn').addEventListener('click',requestAi);
+document.getElementById('rt-ai-btn').addEventListener('click',requestRtAi);
 document.getElementById('nv-add').addEventListener('click',countNv);
 document.getElementById('nv-clear').addEventListener('click',function(){nv={};nvBase={};save('sr-nv',nv);save('sr-nvbase',nvBase);document.getElementById('nvtext').value='';document.getElementById('nv-msg').textContent='';renderAll();});
 document.getElementById('st-add').addEventListener('click',function(){ var i=document.getElementById('st-word'); addStop(i.value); i.value=''; });
@@ -1214,7 +1297,7 @@ document.getElementById('fm-clear').addEventListener('click',function(){fm={};fm
 function pull(){
   try{ fetch('trend.json?t='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(j&&j.stocks){
-      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,prevGeneratedISO:j.prevGeneratedISO||null,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,runLog:j.runLog||[],aiSummary:j.aiSummary||null,aiUsage:j.aiUsage||null,aiBudget:j.aiBudget||null,aiRequestedAt:j.aiRequestedAt||0,refreshAt:j.refreshAt||0,f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
+      data={generatedAt:j.generatedAt,generatedISO:j.generatedISO,prevGeneratedISO:j.prevGeneratedISO||null,priceAt:j.priceAt,priceISO:j.priceISO,isSample:false,skipped:j.skipped||[],stocks:j.stocks,dict:j.dict||[],titleCount:j.titleCount||null,runLog:j.runLog||[],aiSummary:j.aiSummary||null,aiUsage:j.aiUsage||null,aiBudget:j.aiBudget||null,aiWin:j.aiWin||{},aiRequestedAt:j.aiRequestedAt||0,refreshAt:j.refreshAt||0,f13:j.f13||null,npsLive:!!(j.nps&&j.nps.length),top3:j.top3||null,nps:(j.nps&&j.nps.length)?j.nps:SAMPLE.nps};
       if(j.listsLive){ listsLoaded=true; aliasMap=j.aliasMap||{}; stopList=j.stopWords||[]; save('sr-stop',stopList); }
       loadLists(); renderAmap(); renderStops(); renderLog(); renderAi();
       ensureDictStocks(); ensureNaver(); mergeLinked(); head(); renderNps(); renderAll();
