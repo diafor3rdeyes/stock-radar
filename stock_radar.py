@@ -101,26 +101,43 @@ def load_json(path, default):
 
 # ---------- 평소(기준) 계산 ----------
 def update_history(today_counts):
-    """history.json: {날짜: {종목: {출처: 건수}}}. 같은 날 재실행하면 그날 값을 덮어씀."""
+    """history.json: {날짜: {"n": 실행 횟수, "sum": {종목: {출처: 누적 건수}}}}.
+    하루에 여러 번 돌려도 "한 번 돌 때의 평균 언급 수"를 비교할 수 있게 누적한다."""
     hist = load_json("history.json", {})
-    hist[now_kst().date().isoformat()] = today_counts
+    day = now_kst().date().isoformat()
+    cur = hist.get(day)
+    if not (isinstance(cur, dict) and "n" in cur):
+        cur = {"n": 0, "sum": {}}
+    cur["n"] += 1
+    for name, per in today_counts.items():
+        d = cur["sum"].setdefault(name, {})
+        for src, c in per.items():
+            d[src] = d.get(src, 0) + c
+    hist[day] = cur
     for d in sorted(hist)[:-30]:
         del hist[d]
     json.dump(hist, open("history.json", "w", encoding="utf-8"), ensure_ascii=False)
     return hist
 
 def baseline(hist, name):
-    """오늘을 뺀 최근 BASE_DAYS일의 출처별 평균. 기록이 없으면 None(화면에 '기준 수집 중' 표시)."""
+    """오늘을 뺀 최근 BASE_DAYS일, 하루 평균(한 번 돌 때)의 출처별 평균. 기록이 없으면 None."""
     today = now_kst().date().isoformat()
     days = [d for d in sorted(hist) if d != today][-BASE_DAYS:]
-    days = [d for d in days if name in hist[d]]
-    if not days:
-        return None
-    acc = defaultdict(float)
+    acc, used = defaultdict(float), 0
     for d in days:
-        for src, c in hist[d][name].items():
-            acc[src] += c
-    return {src: round(v / len(days), 1) for src, v in acc.items()}
+        e = hist[d]
+        if "n" in e:
+            per, n = e["sum"].get(name), e["n"]
+        else:                      # 예전 형식(하루 1회 값)
+            per, n = e.get(name), 1
+        if per is None or not n:
+            continue
+        used += 1
+        for src, v in per.items():
+            acc[src] += v / n
+    if not used:
+        return None
+    return {src: round(v / used, 1) for src, v in acc.items()}
 
 # ---------- 시세 ----------
 def fetch_prices():
@@ -153,7 +170,7 @@ def fetch_nps(days=90):
     while page <= 20:
         r = requests.get("https://opendart.fss.or.kr/api/list.json", params={
             "crtfc_key": key, "bgn_de": bgn.strftime("%Y%m%d"), "end_de": end.strftime("%Y%m%d"),
-            "pblntf_ty": "D", "page_no": page, "page_count": 100}, timeout=20).json()
+            "pblntf_ty": "D", "page_no": page, "page_count": 100}, timeout=10).json()
         if r.get("status") not in ("000", "013"):   # 013 = 조회된 데이터 없음
             print("DART 응답:", r.get("status"), r.get("message"))
             break
@@ -183,7 +200,7 @@ def _num(x):
 def _dart(path, **params):
     key = os.environ.get("DART_API_KEY", "").strip()
     r = requests.get(f"https://opendart.fss.or.kr/api/{path}.json",
-                     params={"crtfc_key": key, **params}, timeout=20)
+                     params={"crtfc_key": key, **params}, timeout=10)
     time.sleep(0.25)
     return r.json()
 
@@ -352,63 +369,112 @@ def fetch_13f():
     rows.sort(key=lambda r: -(r["curr"] - r["prev"]))
     return {"period": rec["reportDate"][hits[0]], "filedAt": rec["filingDate"][hits[0]], "rows": rows}
 
-def main():
-    prices_only = "--prices" in sys.argv
-    old = load_json("trend.json", {})
-    out = dict(old) if prices_only and old else {}
-    skipped = old.get("skipped", []) if prices_only else []
-
-    if not prices_only or not old:
-        counts = {n: {} for n in STOCKS}
-        skipped = []
-        for sid, url in SOURCES.items():
-            if not allowed(url):
-                skipped.append(f"{sid} (robots.txt로 자동 수집 불허 또는 확인 실패)")
-                continue
-            try:
-                c = count_mentions(fetch_titles(url))
-            except Exception as e:
-                skipped.append(f"{sid} ({e})")
-                continue
-            for name, v in c.items():
-                counts[name][sid] = v
-        hist = update_history(counts)
-        prev_rank = {s["name"]: i + 1 for i, s in enumerate(old.get("stocks", []))}
-        stocks = []
-        for name, (aliases, code, tv, _y, ccy) in STOCKS.items():
-            m = counts[name]
-            if sum(m.values()) > 0:
-                s = {"name": name, "code": code, "tv": tv, "aliases": aliases,
-                     "prev": prev_rank.get(name), "m": m}
-                b = baseline(hist, name)
-                if b is not None:
-                    s["b"] = b
-                stocks.append(s)
-        stocks.sort(key=lambda s: -sum(s["m"].values()))
-        out.update({"generatedAt": now_kst().strftime("%Y-%m-%d %H:%M"), "generatedISO": now_kst().isoformat(),
-                    "skipped": skipped, "stocks": stocks,
-                    "dict": [{"name": n, "code": v[1], "tv": v[2], "aliases": v[0]} for n, v in STOCKS.items()]})
-        nps = fetch_nps()
-        if nps:
-            out["nps"] = nps
-            try:
-                out["top3"] = build_top3(nps)
-            except Exception as e:
-                print("TOP3 실패:", e)
+def collect_trend(out, old):
+    """커뮤니티 글에서 종목 언급 수를 세어 순위 재료를 만든다."""
+    counts = {n: {} for n in STOCKS}
+    skipped = []
+    for sid, url in SOURCES.items():
+        if not allowed(url):
+            skipped.append(f"{sid} (robots.txt로 자동 수집 불허 또는 확인 실패)")
+            continue
         try:
-            f13 = fetch_13f()
-            if f13:
-                out["f13"] = f13
+            c = count_mentions(fetch_titles(url))
         except Exception as e:
-            print("13F 실패:", e)
+            skipped.append(f"{sid} ({e})")
+            continue
+        for name, v in c.items():
+            counts[name][sid] = v
+    hist = update_history(counts)
+    prev_rank = {s["name"]: i + 1 for i, s in enumerate(old.get("stocks", []))}
+    stocks = []
+    for name, (aliases, code, tv, _y, ccy) in STOCKS.items():
+        m = counts[name]
+        if sum(m.values()) > 0:
+            s = {"name": name, "code": code, "tv": tv, "aliases": aliases,
+                 "prev": prev_rank.get(name), "m": m}
+            b = baseline(hist, name)
+            if b is not None:
+                s["b"] = b
+            stocks.append(s)
+    stocks.sort(key=lambda s: -sum(s["m"].values()))
+    out.update({"generatedAt": now_kst().strftime("%Y-%m-%d %H:%M"), "generatedISO": now_kst().isoformat(),
+                "skipped": skipped, "stocks": stocks,
+                "dict": [{"name": n, "code": v[1], "tv": v[2], "aliases": v[0]} for n, v in STOCKS.items()]})
 
-    px, at = fetch_prices()
-    for s in out.get("stocks", []):
-        s.update(px.get(s["name"], {}))
-    out["priceAt"] = at
-    out["priceISO"] = now_kst().isoformat()
-    json.dump(out, open("trend.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    print(f"trend.json 저장: {len(out.get('stocks', []))}종목, 시세 {len(px)}건")
+def collect_filings(out):
+    """국민연금 공시(DART), TOP 3, 미국 13F. 무거워서 하루 몇 번만 돈다.
+    DART는 해외 서버(깃허브)에서 접속이 막힐 수 있어, 실패해도 나머지는 계속 진행한다."""
+    nps = None
+    try:
+        nps = fetch_nps()
+    except Exception as e:
+        print("DART 접속 실패(해외 서버에서 막혔을 수 있음):", type(e).__name__)
+    if nps:
+        out["nps"] = nps
+        try:
+            out["top3"] = build_top3(nps)
+        except Exception as e:
+            print("TOP3 실패:", e)
+    try:
+        f13 = fetch_13f()
+        if f13:
+            out["f13"] = f13
+    except Exception as e:
+        print("13F 실패:", e)
+
+# ---------- 클라우드플레어 KV (내 컴퓨터에서 공시만 따로 돌릴 때) ----------
+def _kv():
+    a = re.sub(r"[^A-Za-z0-9]", "", os.environ.get("CF_ACCOUNT_ID", ""))
+    n = re.sub(r"[^A-Za-z0-9]", "", os.environ.get("CF_KV_NAMESPACE_ID", ""))
+    t = re.sub(r"[^A-Za-z0-9_-]", "", os.environ.get("CF_API_TOKEN", ""))
+    return (f"https://api.cloudflare.com/client/v4/accounts/{a}/storage/kv/namespaces/{n}/values",
+            {"Authorization": f"Bearer {t}"})
+
+def kv_get(key):
+    url, hd = _kv()
+    r = requests.get(f"{url}/{key}", headers=hd, timeout=20)
+    return r.text if r.status_code == 200 else None
+
+def kv_put(key, text):
+    url, hd = _kv()
+    r = requests.put(f"{url}/{key}", headers={**hd, "Content-Type": "text/plain"},
+                     data=text.encode("utf-8"), timeout=30)
+    r.raise_for_status()
+
+def main():
+    """--prices : 시세만 / --trend : 언급 집계 + 시세 / --filings : 공시만(내 컴퓨터용, --kv 권장)
+    인자 없음 : 전부. --kv 를 붙이면 클라우드플레어 KV에서 읽고 KV에 올린다."""
+    a = sys.argv
+    use_kv = "--kv" in a
+    mode = ("prices" if "--prices" in a else "trend" if "--trend" in a
+            else "filings" if "--filings" in a else "full")
+    if use_kv:
+        raw = kv_get("trend")
+        old = json.loads(raw) if raw else {}
+    else:
+        old = load_json("trend.json", {})
+    if not old and mode != "filings":
+        mode = "full"
+    out = dict(old) if mode != "full" else {}
+
+    if mode == "filings":
+        collect_filings(out)
+        out["filingsAt"] = now_kst().isoformat()
+    else:
+        if mode in ("trend", "full"):
+            collect_trend(out, old)
+        if mode == "full":
+            collect_filings(out)
+        px, at = fetch_prices()
+        for s in out.get("stocks", []):
+            s.update(px.get(s["name"], {}))
+        out["priceAt"] = at
+        out["priceISO"] = now_kst().isoformat()
+    text = json.dumps(out, ensure_ascii=False, indent=1)
+    open("trend.json", "w", encoding="utf-8").write(text)
+    if use_kv:
+        kv_put("trend", text)
+    print(f"[{mode}] trend.json 저장: {len(out.get('stocks', []))}종목")
 
 if __name__ == "__main__":
     main()

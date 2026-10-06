@@ -107,7 +107,7 @@ body{margin:0}
 <div class="wrap">
   <div class="top">
     <h1>종목 레이더</h1>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0"><span class="stamp" id="stamp"></span><span class="stamp" id="refresh"></span><button class="btn" id="reload" style="margin-top:4px">지금 새로고침</button></div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0"><span class="stamp" id="stamp"></span><span class="stamp" id="refresh"></span><span style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap;justify-content:flex-end"><span class="stamp" id="refstat"></span><button class="btn primary" id="reload">지금 반영하기</button></span></div>
   </div>
   <div class="banner" id="banner"></div>
 
@@ -443,10 +443,34 @@ function head(){
   else { st.textContent='집계 '+data.generatedAt+(data.generatedISO?' ('+ago(data.generatedISO)+')':'')+' · 시세 '+(data.priceAt||'없음')+(data.priceISO?' ('+ago(data.priceISO)+')':''); }
   var warn = (!data.isSample && data.priceISO && marketHours() && (Date.now()-new Date(data.priceISO).getTime())>40*60000)
     ? ' · 시세가 40분 넘게 갱신되지 않았습니다. 깃허브 Actions 상태를 확인하세요' : '';
-  rf.textContent = '시세는 평일 10분마다, 집계는 매일 09·15·21시에 갱신 · 이 화면은 '+left+'초 뒤 다시 읽습니다'+warn;
+  rf.textContent = '언급 집계와 시세는 평일 10분마다, 국민연금 공시는 매일 09·15·21시에 갱신 · 이 화면은 '+left+'초 뒤 다시 읽습니다'+warn;
   document.getElementById('banner').textContent = data.isSample
     ? '커뮤니티 순위, 비중, 등락률은 화면 확인용 샘플 숫자입니다. 실제 값이 아닙니다. stock_radar.py를 실행해 trend.json을 만들면 실제 값으로 바뀝니다.'
     : '시세는 무료 시세원 기준이라 종목에 따라 지연될 수 있습니다. '+((data.skipped||[]).length ? '수집 제외: '+data.skipped.join(', ') : '');
+}
+var refreshing = false;
+function setStat(t){ document.getElementById('refstat').textContent = t; }
+function endRefresh(){ refreshing = false; document.getElementById('reload').disabled = false; left = POLL; }
+function requestRefresh(){
+  if(refreshing) return;
+  refreshing = true;
+  document.getElementById('reload').disabled = true;
+  setStat('수집을 요청하는 중…');
+  var before = data.generatedISO || '';
+  fetch('/api/refresh',{method:'POST'}).then(function(r){
+    return r.json().catch(function(){return {};}).then(function(j){return {status:r.status,j:j};});
+  }).then(function(x){
+    if(x.status===404 || x.status===503){ setStat('수집 요청 설정 전이라 화면만 새로 읽었습니다.'); pull(); endRefresh(); return; }
+    if(x.status===429){ setStat('방금 요청이 있었습니다. '+(x.j.wait||60)+'초 뒤 다시 눌러 주세요.'); pull(); endRefresh(); return; }
+    if(!x.j.ok){ setStat('수집 요청에 실패했습니다. 화면만 새로 읽었습니다.'); pull(); endRefresh(); return; }
+    setStat('수집 시작됨. 보통 1~2분 걸립니다…');
+    var tries = 0;
+    var iv = setInterval(function(){
+      tries++; pull();
+      if((data.generatedISO||'') !== before){ clearInterval(iv); setStat('반영 완료'); endRefresh(); }
+      else if(tries >= 36){ clearInterval(iv); setStat('3분이 지나도 안 바뀌었습니다. 깃허브 Actions를 확인하세요.'); endRefresh(); }
+    }, 5000);
+  }).catch(function(){ setStat('수집 요청을 보내지 못했습니다.'); pull(); endRefresh(); });
 }
 function countFm(){
   var lines=document.getElementById('fmtext').value.split('\n').map(function(l){return l.trim();}).filter(Boolean);
@@ -503,7 +527,7 @@ function pull(){
 (function init(){
   head(); renderNps(); renderAll();
   pull();
-  document.getElementById('reload').addEventListener('click',function(){pull();left=POLL;head();});
+  document.getElementById('reload').addEventListener('click',requestRefresh);
   setInterval(function(){ left--; if(left<=0){ pull(); left=POLL; } head(); },1000);
 })();
 </script>
