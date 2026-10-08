@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="종목 분석 데스크">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2e49"/>
+      <stop offset="1" stop-color="#0a111b"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f3d896"/>
+      <stop offset="1" stop-color="#bd8830"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <rect x="1" y="1" width="62" height="62" rx="14" fill="none" stroke="#e0a94a" stroke-opacity=".28" stroke-width="1.2"/>
+  <g fill="#8c6a2e" stroke="none"><rect x="16" y="30" width="2" height="22" rx="1"/><rect x="12.5" y="36" width="9" height="10" rx="2"/></g>
+  <g fill="#bf8e3a" stroke="none"><rect x="31" y="22" width="2" height="24" rx="1"/><rect x="27.5" y="28" width="9" height="12" rx="2"/></g>
+  <g fill="url(#gold)" stroke="none"><rect x="46" y="12" width="2" height="26" rx="1"/><rect x="42.5" y="17" width="9" height="14" rx="2"/></g>
+</svg>
