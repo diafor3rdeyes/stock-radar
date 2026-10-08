@@ -49,3 +49,15 @@ worker.js / wrangler.toml     Cloudflare Workers 진입점과 설정
 - 저장소: Workers KV (`wrangler.toml`의 `ALERTS`). 배포 때 자동으로 만들어집니다.
 - 알림(봇 방식, 권장): 슬랙 앱에 `chat:write` 권한을 주고 `#매수에임알람`에 봇을 초대한 뒤, Cloudflare Settings → Variables and secrets 에 `SLACK_BOT_TOKEN`(xoxb-…, Secret)을 추가합니다. 모바일 푸시를 확실히 받으려면 `SLACK_MENTION_USER`(내 멤버 ID)도 넣습니다. 다른 채널은 `SLACK_CHANNEL`로 지정합니다. 웹훅 방식(`SLACK_WEBHOOK_URL`)도 지원하지만 봇 토큰이 있으면 봇이 우선입니다.
 - 확인: `/api/health` 에서 `hasKv`, `hasSlack` 이 true 인지, 화면의 "슬랙 테스트 메시지 보내기"로 점검합니다.
+
+## 구글 계정 로그인 (데이터 보존)
+
+오른쪽 위 "구글 로그인"으로 로그인하면 종목 목록, 순서, 매수 기록, 에임가가 서버(Workers KV)에 저장됩니다. 브라우저 데이터를 지워도 다시 로그인하면 그대로 돌아오고, 다른 기기에서도 같은 데이터를 봅니다.
+
+설정 (한 번만):
+1. Google Cloud Console → APIs & Services → Credentials → Create credentials → OAuth client ID → Web application.
+2. Authorized JavaScript origins 에 `https://stock-desk.<계정>.workers.dev` 추가 (Redirect URI는 비워도 됩니다). OAuth 동의 화면을 먼저 설정하고 본인 이메일을 테스트 사용자로 추가하거나 게시합니다.
+3. Cloudflare Variables 에 `GOOGLE_CLIENT_ID` (발급된 클라이언트 ID), 선택으로 `ALLOWED_EMAILS` (쉼표로 구분한 허용 구글 이메일) 추가.
+
+- `ALLOWED_EMAILS`를 넣으면 그 구글 계정만 로그인할 수 있습니다. 없으면 `ACCESS_CODE`를 아는 사람만 처음 로그인할 수 있습니다.
+- 이미 이 기기에 있던 종목·매수 기록은 처음 로그인할 때 서버로 올라갑니다.

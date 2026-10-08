@@ -62,6 +62,13 @@ button,input{font:inherit;color:inherit;letter-spacing:inherit}
 .pnav a:hover,.codebtn:hover{background:var(--navy);color:var(--navy-ink);border-color:var(--navy)}
 .codepanel{display:none;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:12px}
 .codepanel.open{display:flex}
+.authpanel{flex-direction:column;align-items:stretch;gap:8px}
+.authform{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.authin{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:14px}
+.authform[hidden],.authin[hidden]{display:none}
+.authmsg{min-height:0}
+.authmsg:empty{display:none}
+.authmsg.bad{color:var(--up)}
 .codepanel input{flex:1;min-width:160px;max-width:260px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:8px 16px}
 .hero{background:linear-gradient(180deg,var(--band) 0,var(--hero) 100%);padding-block:56px 44px}
 .hero h1{font-size:clamp(34px,6.4vw,60px);font-weight:800;line-height:1.16;letter-spacing:-.045em}
@@ -289,10 +296,19 @@ td.r,th.r{text-align:right}
     <a class="brand" href="#">종목<span>분석데스크</span></a>
     <div class="bar-r">
       <nav class="pnav" aria-label="바로가기"><a href="#market">시장 현황</a><a href="#watch">내 종목</a></nav>
+      <button class="codebtn" id="authBtn" type="button">구글 로그인</button>
       <button class="codebtn" id="codeBtn" type="button">접근 코드</button>
     </div>
   </div>
   <div class="wrap">
+    <div class="codepanel authpanel" id="authPanel">
+      <div id="authForm" class="authform"><div id="gBtn"></div><span class="small muted" id="gHint">구글 계정으로 로그인하면 종목과 매수 기록이 서버에 저장됩니다.</span></div>
+      <div id="authIn" class="authin" hidden>
+        <span><b id="authName"></b> 님으로 로그인됨 · <span id="syncStat" class="muted">서버에 자동 저장됩니다</span></span>
+        <button class="btn ghost" id="authLogout" type="button">로그아웃</button>
+      </div>
+      <div id="authMsg" class="small authmsg"></div>
+    </div>
     <div class="codepanel" id="codePanel">
       <input id="codeInput" type="password" placeholder="AI 분석용 접근 코드" autocomplete="off">
       <button class="btn ghost" id="codeSave" type="button">저장</button>
@@ -765,7 +781,7 @@ function compactTech(t){
 var WATCH_KEY='sd_watch', ACTIVE_KEY='sd_active', MAX_TABS=10;
 function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
-function saveWatch(){ lsSet(WATCH_KEY, JSON.stringify(state.order)); lsSet(ACTIVE_KEY, state.active||''); }
+function saveWatch(){ lsSet(WATCH_KEY, JSON.stringify(state.order)); lsSet(ACTIVE_KEY, state.active||''); queueSync(); }
 
 var RENDER={ company:function(d){ renderCompany(d); }, news:function(d){ renderNews(d); }, outlook:function(d,rep){ renderOutlook(d, rep.stock); } };
 var LOAD_MSG={ company:'기업 정보를 정리하는 중… (보통 5~15초)', news:'최근 뉴스를 정리하는 중… (보통 5~15초)', outlook:'2주 시나리오를 정리하는 중… (보통 5~15초)' };
@@ -774,11 +790,124 @@ function newReport(s){ return { stock:s, ai:{}, status:{}, err:{}, conclusion:nu
 function isActive(rep){ return state.active===rep.stock.symbol && state.reports[rep.stock.symbol]===rep; }
 function idleBox(){ return '<div class="card"><p class="muted">AI 분석을 아직 실행하지 않았습니다. AI 호출 비용이 들어서, 저장된 종목은 누르기 전에는 돌리지 않습니다.</p><p style="margin-top:10px"><button class="btn ghost" data-act="runall" type="button">AI 분석 실행</button></p></div>'; }
 
+/* ---------- 계정 로그인 · 서버 저장 (종목·매수 기록이 기기 데이터 삭제로 사라지지 않게) ---------- */
+var TOKEN_KEY='sd_token', USER_KEY='sd_user', LABEL_KEY='sd_user_label';
+var authUser=lsGet(USER_KEY)||'', authLabel=lsGet(LABEL_KEY)||'', googleReady=false, syncReady=false, syncTimer=0, syncBusy=false;
+function authToken(){ return lsGet(TOKEN_KEY)||''; }
+function authHeaders(){ var t=authToken(); return t?{authorization:'Bearer '+t}:{}; }
+function authFetch(path,opt){
+  opt=opt||{}; opt.headers=Object.assign({'content-type':'application/json','x-access-code':getCode()},authHeaders(),opt.headers||{});
+  return fetch(path,opt).then(function(r){ return r.json().then(function(j){ return {status:r.status,j:j}; },function(){ return {status:r.status,j:{}}; }); });
+}
+function authMsg(t,bad){ var m=$('#authMsg'); m.textContent=t||''; m.className='small authmsg'+(bad?' bad':''); }
+function syncStat(t){ var e=$('#syncStat'); if(e) e.textContent=t; }
+function paintAuth(){
+  var on=!!(authToken()&&authUser);
+  $('#authBtn').textContent=on?'👤 '+(authLabel||authUser).split('@')[0]:'구글 로그인';
+  $('#authForm').hidden=on; $('#authIn').hidden=!on; $('#authName').textContent=authLabel||authUser;
+}
+function nowStr(){ var d=new Date(Date.now()+9*3600*1000); return ('0'+d.getUTCHours()).slice(-2)+':'+('0'+d.getUTCMinutes()).slice(-2); }
+function payload(){
+  var w=state.order.slice(); (state.missing||[]).forEach(function(x){ if(w.indexOf(x)<0) w.push(x); });
+  return {watch:w, active:state.active||'', pos:state.pos};
+}
+function queueSync(){
+  if(!authToken()||!syncReady) return;
+  clearTimeout(syncTimer); syncStat('저장 중…'); syncTimer=setTimeout(function(){ pushNow(false); },1000);
+}
+function pushNow(keep){
+  if(!authToken()) return Promise.resolve();
+  clearTimeout(syncTimer);
+  return fetch('/api/data',{method:'PUT',keepalive:!!keep,headers:Object.assign({'content-type':'application/json'},authHeaders()),body:JSON.stringify(payload())}).then(function(r){
+    if(r.status===401){ forgetLogin('로그인이 만료되었습니다. 다시 구글로 로그인해 주세요.'); return; }
+    if(!r.ok) throw new Error('save');
+    syncStat('✓ 서버에 저장됨 '+nowStr());
+  }).catch(function(){ syncStat('⚠ 저장 실패 — 인터넷 연결을 확인해 주세요'); });
+}
+window.addEventListener('pagehide',function(){ if(syncTimer&&authToken()&&syncReady) pushNow(true); });
+document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden'&&syncTimer&&authToken()&&syncReady) pushNow(true); });
+
+function forgetLogin(msg){
+  try{ localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); localStorage.removeItem(LABEL_KEY); }catch(e){}
+  authUser=''; authLabel=''; syncReady=false; paintAuth(); if(msg){ authMsg(msg,true); $('#authPanel').classList.add('open'); }
+}
+function mergeData(a,b){ // 서버 a + 이 기기 b 를 합친다(중복 제거)
+  var watch=a.watch.slice(); (b.watch||[]).forEach(function(x){ if(watch.indexOf(x)<0) watch.push(x); });
+  var pos={}, k;
+  Object.keys(a.pos||{}).forEach(function(sym){ pos[sym]=a.pos[sym].slice(); });
+  Object.keys(b.pos||{}).forEach(function(sym){
+    var cur=pos[sym]=pos[sym]||[]; (b.pos[sym]||[]).forEach(function(l){ if(l.k===3&&!cur.some(function(x){ return x.id===l.id; })) cur.push(l); });
+    cur.sort(function(x,y){ return x.date<y.date?-1:x.date>y.date?1:0; });
+  });
+  return {watch:watch.slice(0,MAX_TABS), pos:pos, active:a.active};
+}
+function applyData(d){
+  state.pos=d.pos||{}; lsSet(POS_KEY,JSON.stringify(state.pos));
+  lsSet(WATCH_KEY,JSON.stringify(d.watch||[])); lsSet(ACTIVE_KEY,d.active||'');
+  state.reports={}; state.order=[]; state.active=null;
+  var r=$('#report'); r.hidden=true; r.innerHTML='';
+  renderList(); restoreWatch(); loadAims();
+}
+function localData(){
+  var w=[],p={}; try{ w=JSON.parse(lsGet(WATCH_KEY)||'[]'); }catch(e){} try{ p=JSON.parse(lsGet(POS_KEY)||'{}'); }catch(e){}
+  return {watch:Array.isArray(w)?w.filter(function(x){ return typeof x==='string'; }):[], pos:(p&&typeof p==='object')?p:{}, active:lsGet(ACTIVE_KEY)||''};
+}
+// 서버 데이터를 불러온다. merge=true 는 방금 로그인했을 때(이 기기 데이터와 합침), false 는 페이지를 열 때(서버가 기준).
+function pullServer(merge){
+  return authFetch('/api/data').then(function(x){
+    if(x.status===401){ forgetLogin('로그인이 만료되었습니다. 다시 구글로 로그인해 주세요.'); restoreWatch(); loadAims(); return; }
+    if(!(x.status===200&&x.j.ok)){ syncStat('⚠ 서버에서 불러오지 못했습니다 (이 기기 데이터를 표시 중)'); restoreWatch(); loadAims(); return; }
+    var d=x.j.data;
+    if(!d||(!(d.watch||[]).length&&!Object.keys(d.pos||{}).length)){
+      syncReady=true; restoreWatch(); loadAims(); if(localData().watch.length||Object.keys(localData().pos).length) pushNow(false); else syncStat('✓ 서버에 자동 저장됩니다'); return;
+    }
+    var out=d;
+    if(merge){ var m=mergeData(d,localData()); out=m; }
+    applyData(out); syncReady=true;
+    if(merge) pushNow(false); else syncStat('✓ 서버에서 불러옴 '+nowStr());
+  }).catch(function(){ syncStat('⚠ 서버에 연결하지 못했습니다 (이 기기 데이터를 표시 중)'); restoreWatch(); loadAims(); });
+}
+function handleGoogle(resp){
+  if(!resp||!resp.credential){ authMsg('구글 로그인이 취소되었습니다.',true); return; }
+  authMsg('로그인하는 중…');
+  authFetch('/api/auth',{method:'POST',body:JSON.stringify({action:'google',credential:resp.credential,code:getCode()})}).then(function(x){
+    if(x.status===200&&x.j.ok){
+      lsSet(TOKEN_KEY,x.j.token); lsSet(USER_KEY,x.j.username); lsSet(LABEL_KEY,x.j.label||''); authUser=x.j.username; authLabel=x.j.label||'';
+      authMsg(''); paintAuth(); syncStat('불러오는 중…'); pullServer(true);
+    } else authMsg(x.j.error||(x.status===503?'서버 저장소(KV)가 아직 연결되지 않았습니다.':'로그인하지 못했습니다.'),true);
+  }).catch(function(){ authMsg('서버에 연결하지 못했습니다.',true); });
+}
+function googleSetup(){
+  if(googleReady||authToken()) return;
+  fetch('/api/auth?config=1').then(function(r){ return r.json(); }).then(function(c){
+    if(!c||!c.googleClientId){ authMsg('구글 로그인 설정이 아직 끝나지 않았습니다. (서버에 GOOGLE_CLIENT_ID가 필요합니다)',true); $('#gHint').hidden=true; return; }
+    var go=function(){
+      try{
+        google.accounts.id.initialize({client_id:c.googleClientId,callback:handleGoogle,auto_select:false});
+        google.accounts.id.renderButton($('#gBtn'),{theme:'outline',size:'large',text:'signin_with',shape:'pill',locale:'ko'});
+        googleReady=true;
+      }catch(e){ authMsg('구글 로그인 버튼을 불러오지 못했습니다.',true); }
+    };
+    if(window.google&&window.google.accounts) go();
+    else { var sc=document.createElement('script'); sc.src='https://accounts.google.com/gsi/client'; sc.async=true; sc.onload=go; sc.onerror=function(){ authMsg('구글 로그인 스크립트를 불러오지 못했습니다. 인터넷 연결이나 차단 프로그램을 확인해 주세요.',true); }; document.head.appendChild(sc); }
+  }).catch(function(){ authMsg('서버에 연결하지 못했습니다.',true); });
+}
+function doLogout(){
+  var t=authToken();
+  (t?pushNow(false):Promise.resolve()).then(function(){ return authFetch('/api/auth',{method:'POST',body:JSON.stringify({action:'logout'})}).catch(function(){}); }).then(function(){
+    [WATCH_KEY,ACTIVE_KEY,POS_KEY,'sd_aim',FX_KEY].forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} });
+    forgetLogin(''); state.pos={}; state.aims={}; applyData({watch:[],pos:{},active:''}); authMsg('로그아웃했습니다. 다시 구글로 로그인하면 종목과 매수 기록이 돌아옵니다.');
+  });
+}
+$('#authBtn').addEventListener('click',function(){ var p=$('#authPanel'); p.classList.toggle('open'); if(p.classList.contains('open')) googleSetup(); });
+$('#authLogout').addEventListener('click',doLogout);
+paintAuth();
+
 /* ---------- 매수 기록 · 수익률 (매입가=1주당 원화 가격 × 수량, 해외주식은 현재 환율 반영) ---------- */
 var POS_KEY='sd_pos';
 state.pos={}; state.fxNow={};
 try{ var _p=JSON.parse(lsGet(POS_KEY)||'{}'); if(_p&&typeof _p==='object'&&!Array.isArray(_p)) state.pos=_p; }catch(e){}
-function savePos(){ lsSet(POS_KEY, JSON.stringify(state.pos)); }
+function savePos(){ lsSet(POS_KEY, JSON.stringify(state.pos)); queueSync(); }
 function todayStr(){ var d=new Date(Date.now()+9*3600*1000); return d.toISOString().slice(0,10); }
 function parseAmt(v){ var n=parseFloat(String(v||'').replace(/[^0-9.]/g,'')); return isFinite(n)&&n>0?n:null; }
 function won(v){ return isNum(v)?nf(Math.round(v),0)+'원':'–'; }
@@ -879,7 +1008,7 @@ state.aims={}; state.aimServer=null; state.aimErr=''; state.slackOn=null;
 try{ var _a=JSON.parse(lsGet(AIM_KEY)||'{}'); if(_a&&typeof _a==='object'&&!Array.isArray(_a)) state.aims=_a; }catch(e){}
 function saveAimCache(){ lsSet(AIM_KEY, JSON.stringify(state.aims)); }
 function aimFetch(path,opt){
-  opt=opt||{}; opt.headers=Object.assign({'content-type':'application/json','x-access-code':getCode()},opt.headers||{});
+  opt=opt||{}; opt.headers=Object.assign({'content-type':'application/json','x-access-code':getCode()},authHeaders(),opt.headers||{});
   return fetch(path,opt).then(function(r){ return r.json().then(function(j){ return {status:r.status,j:j}; },function(){ return {status:r.status,j:{}}; }); });
 }
 function aimStatus(sym,s){
@@ -888,11 +1017,12 @@ function aimStatus(sym,s){
   return { a:a, remain:(a.aim/s.price-1)*100, reached:!!a.alertedAt||hit, sent:!!a.alertedAt };
 }
 function loadAims(){
+  if(!authToken()){ state.aimServer=false; state.aimErr='로그인이 필요합니다. 오른쪽 위 "구글 로그인"에서 로그인하면 슬랙 알림을 쓸 수 있습니다.'; renderList(); var r0=state.reports[state.active]; if(r0) renderAim(r0); return Promise.resolve(); }
   return aimFetch('/api/aim').then(function(x){
     if(x.status===200&&x.j.ok){
       var m={}; (x.j.items||[]).forEach(function(i){ m[i.symbol]=i; });
       state.aims=m; state.slackOn=!!x.j.slack; state.aimServer=true; state.aimErr=''; saveAimCache();
-    } else { state.aimServer=false; state.aimErr=(x.status===401?'접근 코드가 필요합니다. 오른쪽 위 "접근 코드"에 입력해 주세요.':(x.j.error||'알림 서버에 연결하지 못했습니다.')); }
+    } else { state.aimServer=false; state.aimErr=(x.status===401?'로그인이 필요합니다. 오른쪽 위 "구글 로그인"에서 로그인하면 슬랙 알림을 쓸 수 있습니다.':(x.j.error||'알림 서버에 연결하지 못했습니다.')); }
   }).catch(function(){ state.aimServer=false; state.aimErr='알림 서버에 연결하지 못했습니다.'; })
   .then(function(){ renderList(); var rep=state.reports[state.active]; if(rep) renderAim(rep); });
 }
@@ -923,7 +1053,7 @@ function setAim(rep){
     if(x.status===200&&x.j.ok){ state.aims[s.symbol]=x.j.item; state.aimServer=true; state.aimErr=''; }
     else {
       state.aims[s.symbol]={symbol:s.symbol,name:s.name,currency:s.currency,aim:v,dir:v<=s.price?'down':'up',alertedAt:null,local:true};
-      state.aimServer=false; state.aimErr=x.status===401?'접근 코드가 필요합니다. 오른쪽 위 "접근 코드"에 입력해 주세요.':(x.j.error||'알림 서버에 저장하지 못했습니다.');
+      state.aimServer=false; state.aimErr=x.status===401?'로그인이 필요합니다. 오른쪽 위 "구글 로그인"에서 로그인하면 슬랙 알림을 쓸 수 있습니다.':(x.j.error||'알림 서버에 저장하지 못했습니다.');
     }
     saveAimCache(); $('#aimPx').value=''; renderAim(rep); renderList();
   }).catch(function(){ btn.disabled=false; err.innerHTML='<div class="err">저장하지 못했습니다. 잠시 후 다시 시도해 주세요.</div>'; });
@@ -1148,6 +1278,7 @@ function restoreWatch(){
   saved=saved.filter(function(x){ return typeof x==='string'; }).slice(0,MAX_TABS);
   var want=lsGet(ACTIVE_KEY);
   Promise.all(saved.map(function(sym){ return fetchStock(sym).then(function(s){ return s; }, function(){ return null; }); })).then(function(list){
+    state.missing=saved.filter(function(sym,i){ return !list[i]; }); // 일시적으로 못 불러온 종목은 서버 목록에서 지우지 않는다
     list.forEach(function(s){ if(s && !state.reports[s.symbol]){ state.reports[s.symbol]=newReport(s); state.order.push(s.symbol); } });
     if(!state.order.length) return;
     if(want && state.reports[want]) show(want); else renderList();
@@ -1170,7 +1301,7 @@ document.addEventListener('click', function(ev){
     var eb=$('#aimErr'); el.disabled=true; eb.innerHTML='<p class="muted small">보내는 중…</p>';
     aimFetch('/api/aim-test',{method:'POST',body:'{}'}).then(function(x){
       el.disabled=false;
-      eb.innerHTML=(x.status===200&&x.j.ok)?'<p class="small" style="margin-top:10px">✅ 슬랙으로 테스트 메시지를 보냈습니다. 슬랙에서 확인해 주세요.</p>':'<div class="err">'+esc(x.status===401?'접근 코드가 필요합니다.':(x.j.error||'보내지 못했습니다.'))+'</div>';
+      eb.innerHTML=(x.status===200&&x.j.ok)?'<p class="small" style="margin-top:10px">✅ 슬랙으로 테스트 메시지를 보냈습니다. 슬랙에서 확인해 주세요.</p>':'<div class="err">'+esc(x.status===401?'로그인이 필요합니다.':(x.j.error||'보내지 못했습니다.'))+'</div>';
     }).catch(function(){ el.disabled=false; eb.innerHTML='<div class="err">보내지 못했습니다.</div>'; });
     return;
   }
@@ -1250,8 +1381,7 @@ document.addEventListener('keydown', function(ev){
 });
 
 renderList();
-restoreWatch();
-loadAims();
+if(authToken()&&authUser){ syncStat('불러오는 중…'); pullServer(false); } else { restoreWatch(); loadAims(); }
 loadMarket();
 })();
 </script>

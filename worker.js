@@ -4,6 +4,7 @@ import * as stock from './functions/api/stock.js';
 import * as analyze from './functions/api/analyze.js';
 import * as price from './functions/api/price.js';
 import * as aim from './functions/api/aim.js';
+import * as account from './functions/api/account.js';
 
 const notFound = () =>
   new Response(JSON.stringify({ error: 'not found' }), {
@@ -27,6 +28,7 @@ export default {
           hasSlack: !!((env.SLACK_BOT_TOKEN && String(env.SLACK_BOT_TOKEN).trim()) || (env.SLACK_WEBHOOK_URL && String(env.SLACK_WEBHOOK_URL).trim())),
           slackMode: env.SLACK_BOT_TOKEN && String(env.SLACK_BOT_TOKEN).trim() ? 'bot' : env.SLACK_WEBHOOK_URL ? 'webhook' : null,
           hasKv: !!env.ALERTS,
+          hasGoogle: !!(env.GOOGLE_CLIENT_ID && String(env.GOOGLE_CLIENT_ID).trim()),
           envNames: Object.keys(env).filter((k) => k !== 'ASSETS' && k !== 'CF_VERSION_METADATA'),
           version: meta.id || null,
           versionTime: meta.timestamp || null,
@@ -39,6 +41,7 @@ export default {
       if (url.pathname === '/api/market' && request.method === 'GET') return await market.onRequestGet(context);
       if (url.pathname === '/api/stock' && request.method === 'GET') return await stock.onRequestGet(context);
       if (url.pathname === '/api/price' && request.method === 'GET') return await price.onRequestGet(context);
+      if (url.pathname === '/api/auth' || url.pathname === '/api/data') return await account.onRequest(context);
       if (url.pathname === '/api/aim' || url.pathname === '/api/aim-test') return await aim.onRequest(context);
       if (url.pathname === '/api/analyze' && request.method === 'POST') return await analyze.onRequestPost(context);
     } catch (e) {
